@@ -1,0 +1,1156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SocialOS — Agent Flow & Wireframe</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --violet: #6C3CE1;
+    --violet-light: #A78BFA;
+    --violet-pale: #EDE8FF;
+    --dark: #0F0A1E;
+    --mid: #1E1640;
+    --raised: #2D235A;
+    --white: #ffffff;
+    --gray: #6B7280;
+    --gray-light: #D1D5DB;
+    --success: #10B981;
+    --warning: #F59E0B;
+    --danger: #F87171;
+    --reel: #3B82F6;
+    --carousel: #10B981;
+    --graphic: #A78BFA;
+    --story: #F59E0B;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    background: var(--dark);
+    color: var(--white);
+    min-height: 100vh;
+  }
+
+  /* ── NAV TABS ── */
+  .nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    background: rgba(15,10,30,0.95);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    display: flex; align-items: center;
+    padding: 0 32px; height: 56px; gap: 8px;
+  }
+  .nav-logo { font-size: 18px; font-weight: 800; color: var(--violet-light); margin-right: 24px; letter-spacing: -0.5px; }
+  .nav-logo span { color: var(--white); }
+  .tab {
+    padding: 6px 16px; border-radius: 6px; font-size: 13px; font-weight: 500;
+    cursor: pointer; transition: all 0.2s; color: var(--gray);
+    border: none; background: transparent;
+  }
+  .tab:hover { background: rgba(255,255,255,0.06); color: var(--white); }
+  .tab.active { background: rgba(108,60,225,0.2); color: var(--violet-light); }
+
+  /* ── SECTIONS ── */
+  .section { display: none; padding: 72px 32px 48px; max-width: 1400px; margin: 0 auto; }
+  .section.active { display: block; }
+
+  /* ── AGENT FLOW ── */
+  .flow-header { text-align: center; margin-bottom: 48px; }
+  .flow-header h1 { font-size: 32px; font-weight: 800; letter-spacing: -1px; margin-bottom: 8px; }
+  .flow-header p { color: var(--gray); font-size: 15px; }
+
+  .flow-grid {
+    display: grid;
+    grid-template-columns: 220px 1fr 220px;
+    gap: 0;
+    align-items: start;
+  }
+
+  .flow-left { display: flex; flex-direction: column; gap: 0; }
+  .flow-center { display: flex; flex-direction: column; align-items: center; gap: 0; }
+  .flow-right { display: flex; flex-direction: column; gap: 0; }
+
+  /* Input block */
+  .input-block {
+    background: rgba(30,22,64,0.8);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px; padding: 16px 20px;
+    margin-bottom: 16px;
+  }
+  .input-block .label { font-size: 11px; color: var(--gray); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px; }
+  .input-block .title { font-size: 14px; font-weight: 600; color: var(--white); margin-bottom: 6px; }
+  .input-tag { display: inline-block; background: rgba(108,60,225,0.2); color: var(--violet-light); font-size: 11px; padding: 2px 8px; border-radius: 100px; margin: 2px 2px 0 0; }
+
+  /* Agent node */
+  .agent-node {
+    width: 100%; max-width: 520px;
+    border-radius: 16px;
+    border: 1px solid rgba(255,255,255,0.08);
+    overflow: hidden;
+    position: relative;
+  }
+  .agent-header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 16px 20px;
+    background: linear-gradient(135deg, rgba(108,60,225,0.3), rgba(45,35,90,0.5));
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .agent-icon {
+    width: 40px; height: 40px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; flex-shrink: 0;
+  }
+  .agent-num { font-size: 10px; color: var(--gray); font-weight: 500; }
+  .agent-name { font-size: 16px; font-weight: 700; }
+  .agent-tag { background: rgba(108,60,225,0.3); color: var(--violet-light); font-size: 10px; padding: 2px 8px; border-radius: 100px; margin-left: auto; }
+  .agent-body { padding: 16px 20px; background: rgba(30,22,64,0.6); }
+  .agent-desc { font-size: 13px; color: var(--gray-light); line-height: 1.6; margin-bottom: 12px; }
+
+  /* Sub-agents */
+  .sub-agents { display: flex; gap: 10px; margin-top: 12px; }
+  .sub-agent {
+    flex: 1; border-radius: 10px; padding: 12px 14px;
+    background: rgba(15,10,30,0.5); border: 1px solid rgba(255,255,255,0.06);
+  }
+  .sub-agent .sa-icon { font-size: 18px; margin-bottom: 6px; }
+  .sub-agent .sa-name { font-size: 12px; font-weight: 600; color: var(--white); margin-bottom: 4px; }
+  .sub-agent .sa-desc { font-size: 11px; color: var(--gray); line-height: 1.4; }
+
+  /* Output tags */
+  .output-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .output-tag {
+    font-size: 11px; padding: 3px 10px; border-radius: 100px; font-weight: 500;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .out-pptx { background: rgba(168,85,247,0.2); color: #C084FC; border: 1px solid rgba(168,85,247,0.3); }
+  .out-xlsx { background: rgba(16,185,129,0.2); color: #6EE7B7; border: 1px solid rgba(16,185,129,0.3); }
+  .out-json { background: rgba(59,130,246,0.2); color: #93C5FD; border: 1px solid rgba(59,130,246,0.3); }
+  .out-png  { background: rgba(245,158,11,0.2); color: #FCD34D; border: 1px solid rgba(245,158,11,0.3); }
+  .out-report { background: rgba(239,68,68,0.2); color: #FCA5A5; border: 1px solid rgba(239,68,68,0.3); }
+
+  /* Connector arrows */
+  .connector {
+    width: 2px; height: 32px;
+    background: linear-gradient(to bottom, var(--violet), var(--violet-light));
+    position: relative; margin: 0 auto;
+  }
+  .connector::after {
+    content: ''; position: absolute; bottom: -6px; left: 50%;
+    transform: translateX(-50%);
+    border-left: 6px solid transparent; border-right: 6px solid transparent;
+    border-top: 8px solid var(--violet-light);
+  }
+  .connector.parallel {
+    display: none;
+  }
+
+  /* Parallel branch */
+  .parallel-branch {
+    display: flex; gap: 16px; width: 100%; max-width: 520px;
+    margin: 8px 0;
+  }
+  .parallel-branch .sub-agent-node {
+    flex: 1; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08);
+    overflow: hidden;
+  }
+  .parallel-branch .sub-agent-node .san-header {
+    padding: 12px 14px; display: flex; align-items: center; gap: 8px;
+    background: rgba(45,35,90,0.5); border-bottom: 1px solid rgba(255,255,255,0.06);
+    font-size: 13px; font-weight: 600;
+  }
+  .parallel-branch .sub-agent-node .san-body {
+    padding: 12px 14px; background: rgba(15,10,30,0.4);
+    font-size: 11px; color: var(--gray); line-height: 1.5;
+  }
+  .parallel-label {
+    font-size: 10px; color: var(--gray); text-transform: uppercase;
+    letter-spacing: 1px; text-align: center; margin: 4px 0;
+    padding: 4px 12px; background: rgba(255,255,255,0.04); border-radius: 100px;
+  }
+
+  /* Refresh loop */
+  .loop-box {
+    position: relative;
+    border: 2px dashed rgba(108,60,225,0.4);
+    border-radius: 20px;
+    padding: 20px;
+    margin: 32px 0;
+    background: rgba(108,60,225,0.04);
+  }
+  .loop-label {
+    position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+    background: var(--violet); color: white;
+    font-size: 11px; font-weight: 600; padding: 2px 14px; border-radius: 100px;
+    white-space: nowrap;
+  }
+
+  /* Output panel */
+  .output-panel {
+    border-radius: 12px; padding: 16px 20px;
+    background: rgba(30,22,64,0.8); border: 1px solid rgba(255,255,255,0.06);
+    margin-top: 12px; width: 100%;
+  }
+  .output-panel .op-label { font-size: 10px; color: var(--gray); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 10px; }
+  .op-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+  .op-item:last-child { border-bottom: none; }
+  .op-icon { font-size: 18px; width: 28px; text-align: center; }
+  .op-name { font-size: 13px; font-weight: 500; }
+  .op-desc { font-size: 11px; color: var(--gray); margin-top: 1px; }
+
+  /* ── WIREFRAMES ── */
+  .wireframe-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .wireframe-card {
+    border-radius: 16px; overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .wf-title {
+    padding: 12px 16px; font-size: 13px; font-weight: 600;
+    background: rgba(108,60,225,0.2); border-bottom: 1px solid rgba(255,255,255,0.06);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .wf-screen {
+    background: var(--mid); padding: 16px;
+    font-size: 11px; color: var(--gray);
+  }
+
+  /* Dashboard wireframe */
+  .wf-nav { background: rgba(15,10,30,0.9); padding: 8px 12px; border-radius: 8px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+  .wf-nav-logo { width: 20px; height: 20px; background: var(--violet); border-radius: 4px; }
+  .wf-nav-text { font-size: 11px; font-weight: 700; color: var(--white); }
+  .wf-nav-tabs { display: flex; gap: 4px; margin-left: auto; }
+  .wf-nav-tab { background: rgba(255,255,255,0.06); padding: 3px 8px; border-radius: 4px; font-size: 10px; color: var(--gray); }
+  .wf-nav-tab.active { background: rgba(108,60,225,0.3); color: var(--violet-light); }
+
+  .wf-layout { display: grid; grid-template-columns: 48px 1fr; gap: 10px; }
+  .wf-sidebar { display: flex; flex-direction: column; gap: 4px; }
+  .wf-sidebar-item { width: 48px; height: 36px; background: rgba(255,255,255,0.04); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+  .wf-sidebar-item.active { background: rgba(108,60,225,0.3); }
+
+  .wf-main { display: flex; flex-direction: column; gap: 8px; }
+  .wf-hero { background: linear-gradient(135deg, rgba(108,60,225,0.3), rgba(30,22,64,0.5)); border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 8px; }
+  .wf-hero-logo { width: 28px; height: 28px; background: var(--violet); border-radius: 6px; }
+  .wf-hero-text { flex: 1; }
+  .wf-hero-name { font-size: 12px; font-weight: 600; color: var(--white); }
+  .wf-hero-sub { font-size: 10px; color: var(--gray); }
+  .wf-hero-btn { background: var(--violet); color: white; font-size: 10px; padding: 5px 10px; border-radius: 6px; font-weight: 600; }
+
+  .wf-metrics { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; }
+  .wf-metric { background: rgba(45,35,90,0.6); border-radius: 8px; padding: 8px 10px; border: 1px solid rgba(255,255,255,0.06); }
+  .wf-metric-val { font-size: 16px; font-weight: 700; color: var(--white); }
+  .wf-metric-label { font-size: 9px; color: var(--gray); margin-top: 2px; }
+  .wf-metric-delta { font-size: 9px; color: var(--success); margin-top: 4px; }
+
+  .wf-row2 { display: grid; grid-template-columns: 3fr 2fr; gap: 8px; }
+  .wf-agents-panel { background: rgba(30,22,64,0.5); border-radius: 8px; padding: 10px; border: 1px solid rgba(255,255,255,0.04); }
+  .wf-agent-row { display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.03); }
+  .wf-agent-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .wf-agent-name-sm { font-size: 10px; color: var(--white); }
+  .wf-agent-time { font-size: 9px; color: var(--gray); margin-left: auto; }
+  .wf-refresh-panel { background: rgba(30,22,64,0.5); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
+  .wf-countdown { font-size: 22px; font-weight: 800; color: var(--violet-light); }
+  .wf-countdown-label { font-size: 9px; color: var(--gray); }
+
+  /* Calendar wireframe */
+  .wf-cal-header { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+  .wf-cal-toggle { display: flex; background: rgba(255,255,255,0.04); border-radius: 6px; }
+  .wf-cal-btn { padding: 4px 10px; font-size: 10px; border-radius: 5px; color: var(--gray); }
+  .wf-cal-btn.active { background: rgba(108,60,225,0.3); color: var(--violet-light); }
+  .wf-cal-export { margin-left: auto; background: rgba(108,60,225,0.2); color: var(--violet-light); font-size: 10px; padding: 4px 10px; border-radius: 6px; }
+
+  .wf-cal-row { display: flex; align-items: center; gap: 6px; padding: 7px 8px; border-radius: 6px; margin-bottom: 4px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.03); }
+  .wf-cal-date { font-size: 10px; color: var(--gray); width: 50px; }
+  .wf-cal-bar { width: 3px; height: 28px; border-radius: 2px; }
+  .wf-cal-content { flex: 1; }
+  .wf-cal-topic { font-size: 11px; font-weight: 500; color: var(--white); }
+  .wf-cal-pillar { font-size: 9px; color: var(--gray); }
+  .wf-cal-type { font-size: 9px; padding: 2px 7px; border-radius: 100px; font-weight: 500; }
+  .type-reel { background: rgba(59,130,246,0.2); color: #93C5FD; }
+  .type-carousel { background: rgba(16,185,129,0.2); color: #6EE7B7; }
+  .type-graphic { background: rgba(167,139,250,0.2); color: #C4B5FD; }
+  .type-story { background: rgba(245,158,11,0.2); color: #FCD34D; }
+
+  /* Agent pipeline wireframe */
+  .wf-pipeline { padding: 8px; }
+  .wf-pipe-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .wf-pipe-title { font-size: 13px; font-weight: 600; color: var(--white); }
+  .wf-pipe-sub { font-size: 10px; color: var(--gray); }
+  .wf-pipe-node {
+    border-radius: 8px; padding: 10px 12px; margin-bottom: 4px;
+    border: 1px solid rgba(255,255,255,0.04);
+    display: flex; align-items: center; gap: 8px;
+    background: rgba(30,22,64,0.4);
+    position: relative;
+  }
+  .wf-pipe-node.running {
+    background: rgba(108,60,225,0.15);
+    border-color: rgba(108,60,225,0.4);
+  }
+  .wf-pipe-node.done { background: rgba(16,185,129,0.08); border-color: rgba(16,185,129,0.2); }
+  .wf-pipe-status { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; flex-shrink: 0; }
+  .status-done { background: rgba(16,185,129,0.3); color: var(--success); }
+  .status-running { background: rgba(108,60,225,0.3); color: var(--violet-light); }
+  .status-pending { background: rgba(255,255,255,0.06); color: var(--gray); }
+  .wf-pipe-name { font-size: 11px; font-weight: 600; color: var(--white); }
+  .wf-pipe-step { font-size: 9px; color: var(--gray); margin-top: 1px; }
+  .wf-pipe-progress { height: 2px; background: rgba(255,255,255,0.06); border-radius: 1px; margin-top: 4px; margin-left: 28px; }
+  .wf-pipe-fill { height: 2px; background: var(--violet-light); border-radius: 1px; }
+  .wf-arrow { text-align: center; font-size: 10px; color: var(--violet); margin: 2px 0; }
+
+  /* Designer agent wireframe */
+  .wf-design-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  .wf-design-card { border-radius: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,0.06); }
+  .wf-design-img { height: 60px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+  .wf-design-info { padding: 6px 8px; background: rgba(15,10,30,0.5); }
+  .wf-design-name { font-size: 9px; font-weight: 600; color: var(--white); }
+  .wf-design-type { font-size: 8px; color: var(--gray); }
+  .wf-design-actions { display: flex; gap: 3px; margin-top: 5px; }
+  .wf-design-btn { font-size: 8px; padding: 2px 5px; border-radius: 3px; }
+  .btn-download { background: rgba(108,60,225,0.3); color: var(--violet-light); }
+  .btn-approve { background: rgba(16,185,129,0.3); color: var(--success); }
+  .btn-regen { background: rgba(255,255,255,0.06); color: var(--gray); }
+
+  /* ── TECH STACK TABLE ── */
+  .tech-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-top: 24px; }
+  .tech-card {
+    border-radius: 12px; padding: 20px;
+    background: rgba(30,22,64,0.6); border: 1px solid rgba(255,255,255,0.06);
+  }
+  .tech-cat { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--violet-light); margin-bottom: 12px; font-weight: 600; }
+  .tech-item { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .tech-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--violet); flex-shrink: 0; }
+  .tech-name { font-size: 13px; font-weight: 500; color: var(--white); }
+  .tech-why { font-size: 11px; color: var(--gray); margin-top: 1px; }
+
+  /* ── DATA FLOW ── */
+  .dataflow { margin-top: 24px; }
+  .df-row {
+    display: flex; align-items: stretch; margin-bottom: 4px;
+  }
+  .df-agent {
+    width: 160px; flex-shrink: 0;
+    border-radius: 8px; padding: 10px 12px;
+    background: rgba(108,60,225,0.15); border: 1px solid rgba(108,60,225,0.3);
+    font-size: 12px; font-weight: 600;
+  }
+  .df-arrow {
+    width: 60px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--violet); font-size: 16px;
+  }
+  .df-data {
+    flex: 1; border-radius: 8px; padding: 10px 12px;
+    background: rgba(30,22,64,0.5); border: 1px solid rgba(255,255,255,0.06);
+    font-size: 11px; color: var(--gray-light);
+  }
+  .df-data .df-key { display: inline-block; background: rgba(59,130,246,0.2); color: #93C5FD; font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 1px 6px; border-radius: 4px; margin: 2px; }
+
+  /* Helpers */
+  .section-title { font-size: 24px; font-weight: 800; margin-bottom: 8px; letter-spacing: -0.5px; }
+  .section-sub { font-size: 14px; color: var(--gray); margin-bottom: 32px; }
+  .label-badge { display: inline-flex; align-items: center; gap: 4px; background: rgba(108,60,225,0.2); color: var(--violet-light); font-size: 11px; padding: 3px 10px; border-radius: 100px; font-weight: 500; }
+
+  /* Pulse animation for running agent */
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(108,60,225,0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(108,60,225,0); }
+  }
+  .status-running { animation: pulse 1.5s infinite; }
+
+  @keyframes shimmer {
+    0% { opacity: 0.6; }
+    50% { opacity: 1; }
+    100% { opacity: 0.6; }
+  }
+  .running-agent { animation: shimmer 2s infinite; }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav">
+  <div class="nav-logo">Social<span>OS</span></div>
+  <button class="tab active" onclick="showSection('flow')">🔄 Agent Flow</button>
+  <button class="tab" onclick="showSection('wireframes')">🖥️ Wireframes</button>
+  <button class="tab" onclick="showSection('dataflow')">📊 Data Flow</button>
+  <button class="tab" onclick="showSection('techstack')">⚙️ Tech Stack</button>
+</nav>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!--  SECTION 1: AGENT FLOW                          -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="flow" class="section active">
+  <div class="flow-header">
+    <h1>SocialOS Agent Architecture</h1>
+    <p>6 AI agents + 2 sub-agents working in sequence to build your complete social media strategy</p>
+  </div>
+
+  <div style="display:flex; gap:24px; align-items:flex-start;">
+
+    <!-- LEFT: INPUTS -->
+    <div style="width:200px; flex-shrink:0; margin-top:80px;">
+      <div class="input-block">
+        <div class="label">Inputs to System</div>
+        <div class="title">Brand Hub</div>
+        <div><span class="input-tag">Website URL</span><span class="input-tag">Logo</span><span class="input-tag">Colors</span><span class="input-tag">Guidelines PDF</span><span class="input-tag">Audience</span><span class="input-tag">Competitors</span><span class="input-tag">Campaigns</span><span class="input-tag">Products</span><span class="input-tag">Instagram Handle</span></div>
+      </div>
+      <div class="input-block">
+        <div class="label">User Config</div>
+        <div class="title">Run Settings</div>
+        <div><span class="input-tag">15 / 30 Days</span><span class="input-tag">Follower Goal</span><span class="input-tag">Research Platforms</span><span class="input-tag">Campaign Context</span></div>
+      </div>
+    </div>
+
+    <!-- CENTER: AGENT CHAIN -->
+    <div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:0;">
+
+      <!-- A1 -->
+      <div class="agent-node" style="border-color:rgba(167,139,250,0.4);">
+        <div class="agent-header">
+          <div class="agent-icon" style="background:rgba(167,139,250,0.2);">🧠</div>
+          <div>
+            <div class="agent-num">AGENT 1</div>
+            <div class="agent-name">Brand Manager</div>
+          </div>
+          <div class="agent-tag">Foundation</div>
+        </div>
+        <div class="agent-body">
+          <div class="agent-desc">Ingests and deeply learns all brand information. Crawls website, reads guidelines PDF, builds brand embeddings in vector store. Every downstream agent reads from this knowledge base.</div>
+          <div class="output-row">
+            <span class="output-tag out-json">🗂 BrandProfile JSON</span>
+            <span class="output-tag out-json">🔮 Vector Embeddings</span>
+          </div>
+        </div>
+      </div>
+      <div class="connector"></div>
+
+      <!-- A2 -->
+      <div class="agent-node" style="border-color:rgba(59,130,246,0.4);">
+        <div class="agent-header" style="background:linear-gradient(135deg,rgba(59,130,246,0.25),rgba(45,35,90,0.5));">
+          <div class="agent-icon" style="background:rgba(59,130,246,0.2);">📊</div>
+          <div>
+            <div class="agent-num">AGENT 2</div>
+            <div class="agent-name">Analyst</div>
+          </div>
+          <div class="agent-tag" style="background:rgba(59,130,246,0.2);color:#93C5FD;">Meta API</div>
+        </div>
+        <div class="agent-body">
+          <div class="agent-desc">Connects to Instagram via Meta Graph API. Fetches all posts, reach, impressions, engagement, comments. Tags content themes, ranks top/bottom performers, detects best posting times. Triggers automatically every 15 days.</div>
+          <div style="display:flex;gap:8px;margin-top:10px;">
+            <div style="flex:1;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.2);border-radius:8px;padding:8px 10px;">
+              <div style="font-size:10px;color:var(--success);font-weight:600;margin-bottom:4px;">✅ What's Working</div>
+              <div style="font-size:10px;color:var(--gray);">Top themes, content types with high engagement</div>
+            </div>
+            <div style="flex:1;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);border-radius:8px;padding:8px 10px;">
+              <div style="font-size:10px;color:var(--danger);font-weight:600;margin-bottom:4px;">❌ What's Not Working</div>
+              <div style="font-size:10px;color:var(--gray);">Underperforming topics, dropped pillars</div>
+            </div>
+          </div>
+          <div class="output-row">
+            <span class="output-tag out-report">📋 Analyst Report</span>
+            <span class="output-tag out-json">📈 Performance Snapshot</span>
+          </div>
+        </div>
+      </div>
+      <div class="connector"></div>
+
+      <!-- A3 + SUB-AGENTS -->
+      <div style="width:100%;">
+        <div style="text-align:center;margin-bottom:6px;">
+          <span class="label-badge">⚡ Parallel Sub-Agents</span>
+        </div>
+        <div class="parallel-branch">
+          <div class="sub-agent-node">
+            <div class="san-header" style="background:rgba(245,158,11,0.1);">
+              <span style="font-size:16px;">🔍</span>
+              <div>
+                <div style="font-size:12px;font-weight:600;color:var(--white);">Research Agent</div>
+                <div style="font-size:9px;color:var(--gray);">Sub-Agent of Growth Planner</div>
+              </div>
+            </div>
+            <div class="san-body">
+              Searches selected platforms simultaneously for trending topics in the brand's niche.
+              <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;">
+                <span class="input-tag" style="background:rgba(239,68,68,0.15);color:#FCA5A5;">Reddit</span>
+                <span class="input-tag" style="background:rgba(34,197,94,0.15);color:#86EFAC;">Google Trends</span>
+                <span class="input-tag" style="background:rgba(59,130,246,0.15);color:#93C5FD;">News API</span>
+                <span class="input-tag" style="background:rgba(249,115,22,0.15);color:#FDBA74;">Instagram</span>
+                <span class="input-tag" style="background:rgba(168,85,247,0.15);color:#D8B4FE;">Quora</span>
+                <span class="input-tag" style="background:rgba(14,165,233,0.15);color:#7DD3FC;">LinkedIn</span>
+              </div>
+            </div>
+          </div>
+          <div class="sub-agent-node">
+            <div class="san-header" style="background:rgba(239,68,68,0.1);">
+              <span style="font-size:16px;">🕵️</span>
+              <div>
+                <div style="font-size:12px;font-weight:600;color:var(--white);">Competitor Tracker</div>
+                <div style="font-size:9px;color:var(--gray);">Sub-Agent of Growth Planner</div>
+              </div>
+            </div>
+            <div class="san-body">
+              Analyzes up to 5 competitor Instagram accounts. Identifies their top content themes, posting frequency, and — critically — the content gaps they're NOT covering that the brand can own.
+            </div>
+          </div>
+        </div>
+
+        <div class="agent-node" style="border-color:rgba(245,158,11,0.4);">
+          <div class="agent-header" style="background:linear-gradient(135deg,rgba(245,158,11,0.2),rgba(45,35,90,0.5));">
+            <div class="agent-icon" style="background:rgba(245,158,11,0.2);">📈</div>
+            <div>
+              <div class="agent-num">AGENT 3</div>
+              <div class="agent-name">Growth Planner</div>
+            </div>
+            <div class="agent-tag" style="background:rgba(245,158,11,0.2);color:#FCD34D;">PPT Output</div>
+          </div>
+          <div class="agent-body">
+            <div class="agent-desc">Synthesizes Analyst data + Research Brief + Competitor Intelligence to define content pillars, content topics, and growth targets for the period. Generates a fully designed, brand-colored PowerPoint strategy deck (15 slides).</div>
+            <div class="output-row">
+              <span class="output-tag out-pptx">📊 Strategy PPT (.pptx)</span>
+              <span class="output-tag out-json">🎯 Content Pillars</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="connector"></div>
+
+      <!-- A4 -->
+      <div class="agent-node" style="border-color:rgba(16,185,129,0.4);">
+        <div class="agent-header" style="background:linear-gradient(135deg,rgba(16,185,129,0.2),rgba(45,35,90,0.5));">
+          <div class="agent-icon" style="background:rgba(16,185,129,0.2);">📅</div>
+          <div>
+            <div class="agent-num">AGENT 4</div>
+            <div class="agent-name">Strategist</div>
+          </div>
+          <div class="agent-tag" style="background:rgba(16,185,129,0.2);color:#6EE7B7;">Excel Output</div>
+        </div>
+        <div class="agent-body">
+          <div class="agent-desc">Converts Growth Planner's pillars into a day-by-day content calendar. AI independently decides content format per topic (Reel / Carousel / Graphic / Story) based on what the Analyst says worked, not a fixed ratio.</div>
+          <div class="output-row">
+            <span class="output-tag out-xlsx">📋 Content Calendar (.xlsx)</span>
+            <span class="output-tag out-json">📌 15–30 Day Schedule</span>
+          </div>
+        </div>
+      </div>
+      <div class="connector"></div>
+
+      <!-- A5 -->
+      <div class="agent-node" style="border-color:rgba(167,139,250,0.5);">
+        <div class="agent-header" style="background:linear-gradient(135deg,rgba(167,139,250,0.2),rgba(45,35,90,0.5));">
+          <div class="agent-icon" style="background:rgba(167,139,250,0.2);">✍️</div>
+          <div>
+            <div class="agent-num">AGENT 5</div>
+            <div class="agent-name">Copywriter</div>
+          </div>
+          <div class="agent-tag">Script + Captions</div>
+        </div>
+        <div class="agent-body">
+          <div class="agent-desc">Writes everything for every post in the calendar — hook (3 variations), full reel script or slide-by-slide carousel breakdown, captions (short + long), hashtags (20–30), SEO keywords, visual brief. Output in detailed Excel.</div>
+          <div class="output-row">
+            <span class="output-tag out-xlsx">📝 Full Content Brief (.xlsx)</span>
+            <span class="output-tag out-json">🎣 Hook Variations</span>
+          </div>
+        </div>
+      </div>
+      <div class="connector"></div>
+
+      <!-- A6 DESIGNER -->
+      <div class="agent-node" style="border-color:rgba(249,115,22,0.5);">
+        <div class="agent-header" style="background:linear-gradient(135deg,rgba(249,115,22,0.2),rgba(45,35,90,0.5));">
+          <div class="agent-icon" style="background:rgba(249,115,22,0.2);">🎨</div>
+          <div>
+            <div class="agent-num">AGENT 6</div>
+            <div class="agent-name">Designer</div>
+          </div>
+          <div class="agent-tag" style="background:rgba(249,115,22,0.2);color:#FDBA74;">AI Image Gen</div>
+        </div>
+        <div class="agent-body">
+          <div class="agent-desc">Extracts all Carousel and Graphic posts from the Copywriter's brief. Generates actual visual designs: slide-by-slide carousel images + static graphics — all using the brand's colors, logo, and visual style. Outputs ready-to-download PNG files per post.</div>
+          <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+            <div style="background:rgba(249,115,22,0.1);border:1px solid rgba(249,115,22,0.2);border-radius:8px;padding:8px 10px;font-size:10px;color:#FDBA74;">🖼 Carousel Slides (per post, all slides)</div>
+            <div style="background:rgba(249,115,22,0.1);border:1px solid rgba(249,115,22,0.2);border-radius:8px;padding:8px 10px;font-size:10px;color:#FDBA74;">📸 Static Graphics (1080×1080px)</div>
+            <div style="background:rgba(249,115,22,0.1);border:1px solid rgba(249,115,22,0.2);border-radius:8px;padding:8px 10px;font-size:10px;color:#FDBA74;">🎨 Brand-colored overlays + logo watermark</div>
+          </div>
+          <div class="output-row">
+            <span class="output-tag out-png">🖼 Carousel PNGs (per slide)</span>
+            <span class="output-tag out-png">📸 Graphic PNGs</span>
+            <span class="output-tag out-json">📦 ZIP Download</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 15-DAY LOOP -->
+      <div style="width:100%;margin-top:32px;">
+        <div class="loop-box">
+          <div class="loop-label">🔄 15-Day Self-Learning Loop (Automatic)</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:8px;">
+            <div style="text-align:center;padding:12px;background:rgba(15,10,30,0.5);border-radius:10px;">
+              <div style="font-size:20px;margin-bottom:6px;">⏰</div>
+              <div style="font-size:12px;font-weight:600;color:var(--white);margin-bottom:4px;">Day 15 Trigger</div>
+              <div style="font-size:10px;color:var(--gray);">BullMQ cron fires automatically. Analyst re-runs against the past 15 days of actual posts.</div>
+            </div>
+            <div style="text-align:center;padding:12px;background:rgba(15,10,30,0.5);border-radius:10px;">
+              <div style="font-size:20px;margin-bottom:6px;">📊</div>
+              <div style="font-size:12px;font-weight:600;color:var(--white);margin-bottom:4px;">Performance Report</div>
+              <div style="font-size:10px;color:var(--gray);">What worked vs didn't. Which pillars performed, which to drop, follower growth vs goal.</div>
+            </div>
+            <div style="text-align:center;padding:12px;background:rgba(15,10,30,0.5);border-radius:10px;">
+              <div style="font-size:20px;margin-bottom:6px;">🧬</div>
+              <div style="font-size:12px;font-weight:600;color:var(--white);margin-bottom:4px;">Recalibrate & Regenerate</div>
+              <div style="font-size:10px;color:var(--gray);">Growth Planner drops failing pillars, doubles winning ones. New PPT + Calendar + Scripts + Designs generated.</div>
+            </div>
+          </div>
+          <div style="text-align:center;margin-top:12px;font-size:11px;color:var(--violet-light);">
+            📚 Brand Learning Log grows with every cycle — the system gets smarter cumulatively, not just from the latest run
+          </div>
+        </div>
+      </div>
+
+    </div><!-- end center -->
+
+    <!-- RIGHT: OUTPUTS -->
+    <div style="width:200px;flex-shrink:0;margin-top:80px;">
+      <div class="output-panel">
+        <div class="op-label">Final Outputs</div>
+        <div class="op-item">
+          <div class="op-icon">📊</div>
+          <div><div class="op-name" style="color:#C084FC;">Strategy PPT</div><div class="op-desc">15-slide brand-colored deck with insights, pillars, targets</div></div>
+        </div>
+        <div class="op-item">
+          <div class="op-icon">📋</div>
+          <div><div class="op-name" style="color:#6EE7B7;">Content Calendar</div><div class="op-desc">15 or 30-day Excel with topic, type, date, pillar per post</div></div>
+        </div>
+        <div class="op-item">
+          <div class="op-icon">📝</div>
+          <div><div class="op-name" style="color:#93C5FD;">Full Brief Excel</div><div class="op-desc">Script, hook, caption, hashtags, SEO, visual brief per post</div></div>
+        </div>
+        <div class="op-item">
+          <div class="op-icon">🖼</div>
+          <div><div class="op-name" style="color:#FDBA74;">Designed Assets</div><div class="op-desc">All carousel slides + graphics as ready-to-post PNGs</div></div>
+        </div>
+        <div class="op-item">
+          <div class="op-icon">📈</div>
+          <div><div class="op-name" style="color:#FCA5A5;">15-Day Report</div><div class="op-desc">Performance comparison at each refresh cycle</div></div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end flex -->
+</div><!-- end flow section -->
+
+
+<!-- ═══════════════════════════════════════════════ -->
+<!--  SECTION 2: WIREFRAMES                          -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="wireframes" class="section">
+  <div class="section-title">Screen Wireframes</div>
+  <div class="section-sub">High-fidelity wireframes for key screens — dark glass morphism aesthetic</div>
+
+  <div class="wireframe-grid">
+
+    <!-- Dashboard -->
+    <div class="wireframe-card">
+      <div class="wf-title">🏠 Main Dashboard</div>
+      <div class="wf-screen">
+        <div class="wf-nav">
+          <div class="wf-nav-logo"></div>
+          <div class="wf-nav-text">SocialOS</div>
+          <div class="wf-nav-tabs">
+            <div class="wf-nav-tab active">Dashboard</div>
+            <div class="wf-nav-tab">Brand Hub</div>
+            <div class="wf-nav-tab">Run Agents</div>
+          </div>
+        </div>
+        <div class="wf-hero">
+          <div class="wf-hero-logo"></div>
+          <div class="wf-hero-text">
+            <div class="wf-hero-name">Mishika Brand</div>
+            <div class="wf-hero-sub">1,234 followers · Last run 2 days ago</div>
+          </div>
+          <div class="wf-hero-btn">▶ Run Agents</div>
+        </div>
+        <div class="wf-metrics" style="margin-top:8px;">
+          <div class="wf-metric"><div class="wf-metric-val">1,234</div><div class="wf-metric-label">Followers</div><div class="wf-metric-delta">▲ +47</div></div>
+          <div class="wf-metric"><div class="wf-metric-val">4.2k</div><div class="wf-metric-label">Avg Reach</div><div class="wf-metric-delta">▲ +12%</div></div>
+          <div class="wf-metric"><div class="wf-metric-val">3.8%</div><div class="wf-metric-label">Engagement</div><div class="wf-metric-delta">▲ +0.4%</div></div>
+          <div class="wf-metric"><div class="wf-metric-val">18</div><div class="wf-metric-label">Posts/Period</div><div class="wf-metric-delta" style="color:var(--warning);">– on track</div></div>
+        </div>
+        <div class="wf-row2" style="margin-top:8px;">
+          <div class="wf-agents-panel">
+            <div style="font-size:10px;color:var(--violet-light);font-weight:600;margin-bottom:6px;">Agent Status</div>
+            <div class="wf-agent-row"><div class="wf-agent-dot" style="background:var(--success)"></div><div class="wf-agent-name-sm">Brand Manager</div><div class="wf-agent-time">2d ago</div></div>
+            <div class="wf-agent-row"><div class="wf-agent-dot" style="background:var(--success)"></div><div class="wf-agent-name-sm">Analyst</div><div class="wf-agent-time">2d ago</div></div>
+            <div class="wf-agent-row"><div class="wf-agent-dot" style="background:var(--success)"></div><div class="wf-agent-name-sm">Growth Planner</div><div class="wf-agent-time">2d ago</div></div>
+            <div class="wf-agent-row"><div class="wf-agent-dot" style="background:var(--success)"></div><div class="wf-agent-name-sm">Strategist</div><div class="wf-agent-time">2d ago</div></div>
+            <div class="wf-agent-row"><div class="wf-agent-dot" style="background:var(--success)"></div><div class="wf-agent-name-sm">Copywriter</div><div class="wf-agent-time">2d ago</div></div>
+            <div class="wf-agent-row"><div class="wf-agent-dot" style="background:var(--success)"></div><div class="wf-agent-name-sm">Designer</div><div class="wf-agent-time">2d ago</div></div>
+          </div>
+          <div class="wf-refresh-panel">
+            <div style="font-size:9px;color:var(--gray);">Next Auto-Refresh in</div>
+            <div class="wf-countdown">13d 4h</div>
+            <div class="wf-countdown-label">Refresh Now ↻</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Agent Pipeline Progress -->
+    <div class="wireframe-card">
+      <div class="wf-title">⚡ Agent Pipeline — Live Progress</div>
+      <div class="wf-screen">
+        <div class="wf-pipe-header">
+          <div>
+            <div class="wf-pipe-title">Running Full Pipeline</div>
+            <div class="wf-pipe-sub">15 Days · Goal: +200 followers · 4 platforms researching</div>
+          </div>
+        </div>
+        <div class="wf-pipe-node done">
+          <div class="wf-pipe-status status-done">✓</div>
+          <div><div class="wf-pipe-name">Brand Manager</div><div class="wf-pipe-step">Brand knowledge loaded · 89% score</div></div>
+          <div style="margin-left:auto;font-size:9px;color:var(--success);">0:28</div>
+        </div>
+        <div class="wf-arrow">↓</div>
+        <div class="wf-pipe-node done">
+          <div class="wf-pipe-status status-done">✓</div>
+          <div><div class="wf-pipe-name">Analyst</div><div class="wf-pipe-step">Analyzed 23 posts · 1,234 followers fetched</div></div>
+          <div style="margin-left:auto;font-size:9px;color:var(--success);">2:14</div>
+        </div>
+        <div class="wf-arrow">↓</div>
+        <div style="display:flex;gap:6px;margin-bottom:4px;">
+          <div class="wf-pipe-node done" style="flex:1;">
+            <div class="wf-pipe-status status-done">✓</div>
+            <div><div class="wf-pipe-name" style="font-size:10px;">Research</div><div class="wf-pipe-step" style="font-size:8px;">Reddit, Google, Instagram scanned</div></div>
+          </div>
+          <div class="wf-pipe-node done" style="flex:1;">
+            <div class="wf-pipe-status status-done">✓</div>
+            <div><div class="wf-pipe-name" style="font-size:10px;">Competitors</div><div class="wf-pipe-step" style="font-size:8px;">3 handles analyzed</div></div>
+          </div>
+        </div>
+        <div class="wf-arrow">↓</div>
+        <div class="wf-pipe-node running">
+          <div class="wf-pipe-status status-running">◎</div>
+          <div style="flex:1;">
+            <div class="wf-pipe-name running-agent">Growth Planner</div>
+            <div class="wf-pipe-step">Defining content pillars based on insights...</div>
+            <div class="wf-pipe-progress"><div class="wf-pipe-fill" style="width:60%;"></div></div>
+          </div>
+        </div>
+        <div class="wf-arrow">↓</div>
+        <div class="wf-pipe-node">
+          <div class="wf-pipe-status status-pending">○</div>
+          <div><div class="wf-pipe-name" style="color:var(--gray);">Strategist</div><div class="wf-pipe-step">Waiting...</div></div>
+        </div>
+        <div class="wf-arrow">↓</div>
+        <div class="wf-pipe-node">
+          <div class="wf-pipe-status status-pending">○</div>
+          <div><div class="wf-pipe-name" style="color:var(--gray);">Copywriter</div><div class="wf-pipe-step">Waiting...</div></div>
+        </div>
+        <div class="wf-arrow">↓</div>
+        <div class="wf-pipe-node">
+          <div class="wf-pipe-status status-pending">○</div>
+          <div><div class="wf-pipe-name" style="color:var(--gray);">Designer</div><div class="wf-pipe-step">Waiting...</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Content Calendar -->
+    <div class="wireframe-card">
+      <div class="wf-title">📅 Content Calendar — List View</div>
+      <div class="wf-screen">
+        <div class="wf-cal-header">
+          <div class="wf-cal-toggle">
+            <div class="wf-cal-btn">Calendar</div>
+            <div class="wf-cal-btn active">List</div>
+          </div>
+          <div style="display:flex;gap:4px;margin-left:8px;">
+            <div style="background:rgba(255,255,255,0.04);font-size:9px;padding:3px 8px;border-radius:4px;color:var(--gray);">All Pillars ▾</div>
+            <div style="background:rgba(255,255,255,0.04);font-size:9px;padding:3px 8px;border-radius:4px;color:var(--gray);">All Types ▾</div>
+          </div>
+          <div class="wf-cal-export">⬇ Export</div>
+        </div>
+        <div class="wf-cal-row">
+          <div class="wf-cal-date">May 20</div>
+          <div class="wf-cal-bar" style="background:var(--reel);"></div>
+          <div class="wf-cal-content">
+            <div class="wf-cal-topic">Morning skincare routine for oily skin</div>
+            <div class="wf-cal-pillar">Education · High Priority</div>
+          </div>
+          <div class="wf-cal-type type-reel">Reel</div>
+        </div>
+        <div class="wf-cal-row">
+          <div class="wf-cal-date">May 22</div>
+          <div class="wf-cal-bar" style="background:var(--carousel);"></div>
+          <div class="wf-cal-content">
+            <div class="wf-cal-topic">5 ingredients you need to avoid</div>
+            <div class="wf-cal-pillar">Education · High Priority</div>
+          </div>
+          <div class="wf-cal-type type-carousel">Carousel</div>
+        </div>
+        <div class="wf-cal-row">
+          <div class="wf-cal-date">May 24</div>
+          <div class="wf-cal-bar" style="background:var(--graphic);"></div>
+          <div class="wf-cal-content">
+            <div class="wf-cal-topic">Product launch — Niacinamide Serum</div>
+            <div class="wf-cal-pillar">Product Showcase · High Priority</div>
+          </div>
+          <div class="wf-cal-type type-graphic">Graphic</div>
+        </div>
+        <div class="wf-cal-row">
+          <div class="wf-cal-date">May 26</div>
+          <div class="wf-cal-bar" style="background:var(--story);"></div>
+          <div class="wf-cal-content">
+            <div class="wf-cal-topic">Poll: Serum or Moisturizer first?</div>
+            <div class="wf-cal-pillar">Engagement · Medium Priority</div>
+          </div>
+          <div class="wf-cal-type type-story">Story</div>
+        </div>
+        <div class="wf-cal-row">
+          <div class="wf-cal-date">May 28</div>
+          <div class="wf-cal-bar" style="background:var(--reel);"></div>
+          <div class="wf-cal-content">
+            <div class="wf-cal-topic">Founder selfie with Mishika — brand story</div>
+            <div class="wf-cal-pillar">Behind the Scenes · Medium Priority</div>
+          </div>
+          <div class="wf-cal-type type-reel">Reel</div>
+        </div>
+        <div class="wf-cal-row">
+          <div class="wf-cal-date">May 30</div>
+          <div class="wf-cal-bar" style="background:var(--carousel);"></div>
+          <div class="wf-cal-content">
+            <div class="wf-cal-topic">Before & after — 30 days of product use</div>
+            <div class="wf-cal-pillar">Social Proof · High Priority</div>
+          </div>
+          <div class="wf-cal-type type-carousel">Carousel</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Designer Agent -->
+    <div class="wireframe-card">
+      <div class="wf-title">🎨 Designer Agent — Review Screen</div>
+      <div class="wf-screen">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+          <div style="font-size:12px;font-weight:600;color:var(--white);">Generated Designs</div>
+          <div style="display:flex;gap:4px;margin-left:auto;">
+            <div style="background:rgba(108,60,225,0.3);color:var(--violet-light);font-size:9px;padding:3px 8px;border-radius:4px;">All</div>
+            <div style="background:rgba(255,255,255,0.04);color:var(--gray);font-size:9px;padding:3px 8px;border-radius:4px;">Carousels</div>
+            <div style="background:rgba(255,255,255,0.04);color:var(--gray);font-size:9px;padding:3px 8px;border-radius:4px;">Graphics</div>
+          </div>
+          <div style="background:var(--success);color:white;font-size:9px;padding:3px 10px;border-radius:4px;font-weight:600;">Approve All ✓</div>
+        </div>
+        <div class="wf-design-grid">
+          <div class="wf-design-card">
+            <div class="wf-design-img" style="background:linear-gradient(135deg,#1E40AF,#7C3AED);">🖼</div>
+            <div class="wf-design-info">
+              <div class="wf-design-name">Skincare Routine</div>
+              <div class="wf-design-type">Carousel · 7 slides · May 22</div>
+              <div class="wf-design-actions">
+                <div class="wf-design-btn btn-approve">✓ OK</div>
+                <div class="wf-design-btn btn-download">↓ PNG</div>
+                <div class="wf-design-btn btn-regen">↻</div>
+              </div>
+            </div>
+          </div>
+          <div class="wf-design-card">
+            <div class="wf-design-img" style="background:linear-gradient(135deg,#065F46,#6C3CE1);">📸</div>
+            <div class="wf-design-info">
+              <div class="wf-design-name">Niacinamide Launch</div>
+              <div class="wf-design-type">Graphic · 1080×1080 · May 24</div>
+              <div class="wf-design-actions">
+                <div class="wf-design-btn btn-approve">✓ OK</div>
+                <div class="wf-design-btn btn-download">↓ PNG</div>
+                <div class="wf-design-btn btn-regen">↻</div>
+              </div>
+            </div>
+          </div>
+          <div class="wf-design-card">
+            <div class="wf-design-img" style="background:linear-gradient(135deg,#7F1D1D,#D97706);">🎨</div>
+            <div class="wf-design-info">
+              <div class="wf-design-name">Avoid These Ingredients</div>
+              <div class="wf-design-type">Carousel · 5 slides · May 22</div>
+              <div class="wf-design-actions">
+                <div class="wf-design-btn btn-approve">✓ OK</div>
+                <div class="wf-design-btn btn-download">↓ PNG</div>
+                <div class="wf-design-btn btn-regen">↻</div>
+              </div>
+            </div>
+          </div>
+          <div class="wf-design-card">
+            <div class="wf-design-img" style="background:linear-gradient(135deg,#1E3A5F,#10B981);">🌿</div>
+            <div class="wf-design-info">
+              <div class="wf-design-name">Before & After 30d</div>
+              <div class="wf-design-type">Carousel · 4 slides · May 30</div>
+              <div class="wf-design-actions">
+                <div class="wf-design-btn btn-approve">✓ OK</div>
+                <div class="wf-design-btn btn-download">↓ ZIP</div>
+                <div class="wf-design-btn btn-regen">↻</div>
+              </div>
+            </div>
+          </div>
+          <div class="wf-design-card">
+            <div class="wf-design-img" style="background:linear-gradient(135deg,#4C1D95,#F59E0B);">⭐</div>
+            <div class="wf-design-info">
+              <div class="wf-design-name">Social Proof Quote</div>
+              <div class="wf-design-type">Graphic · 1080×1080 · Jun 2</div>
+              <div class="wf-design-actions">
+                <div class="wf-design-btn btn-approve">✓ OK</div>
+                <div class="wf-design-btn btn-download">↓ PNG</div>
+                <div class="wf-design-btn btn-regen">↻</div>
+              </div>
+            </div>
+          </div>
+          <div class="wf-design-card" style="border:1px dashed rgba(108,60,225,0.4);background:rgba(108,60,225,0.04);">
+            <div class="wf-design-img" style="background:transparent;color:var(--violet);">+</div>
+            <div class="wf-design-info">
+              <div class="wf-design-name" style="color:var(--violet-light);">Generating...</div>
+              <div class="wf-design-type">Graphic · Jun 4</div>
+              <div style="height:4px;background:rgba(255,255,255,0.06);border-radius:2px;margin-top:6px;"><div style="width:65%;height:4px;background:var(--violet);border-radius:2px;"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end wireframe-grid -->
+</div>
+
+
+<!-- ═══════════════════════════════════════════════ -->
+<!--  SECTION 3: DATA FLOW                           -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="dataflow" class="section">
+  <div class="section-title">Data Flow Between Agents</div>
+  <div class="section-sub">What data each agent receives, processes, and passes to the next</div>
+
+  <div class="dataflow">
+    <div class="df-row">
+      <div class="df-agent">🧠 Brand Manager</div>
+      <div class="df-arrow">→</div>
+      <div class="df-data">
+        <strong>Outputs:</strong>
+        <span class="df-key">brand_profile</span>
+        <span class="df-key">brand_colors</span>
+        <span class="df-key">brand_voice[]</span>
+        <span class="df-key">competitors[]</span>
+        <span class="df-key">knowledge_score</span>
+        <span class="df-key">vector_embeddings</span>
+        <br><span style="font-size:10px;color:var(--gray);margin-top:4px;display:block;">Reads: Brand Hub DB + Website crawl + Guidelines PDF · Stores embeddings in pgvector</span>
+      </div>
+    </div>
+    <div style="padding-left:80px;color:var(--violet);font-size:14px;margin:4px 0;">↓</div>
+
+    <div class="df-row">
+      <div class="df-agent">📊 Analyst</div>
+      <div class="df-arrow">→</div>
+      <div class="df-data">
+        <strong>Receives:</strong> <span class="df-key">brand_profile.instagram_handle</span> <span class="df-key">meta_access_token</span><br>
+        <strong>Outputs:</strong>
+        <span class="df-key">analyst_report</span>
+        <span class="df-key">top_performers[]</span>
+        <span class="df-key">bottom_performers[]</span>
+        <span class="df-key">content_type_performance</span>
+        <span class="df-key">best_posting_times</span>
+        <span class="df-key">whats_working[]</span>
+        <span class="df-key">whats_not_working[]</span>
+        <br><span style="font-size:10px;color:var(--gray);margin-top:4px;display:block;">Reads: Meta Graph API (posts, insights, comments) · Stores snapshot in DB with timestamp</span>
+      </div>
+    </div>
+    <div style="padding-left:80px;color:var(--violet);font-size:14px;margin:4px 0;">↓</div>
+
+    <div style="display:flex;gap:16px;margin-bottom:4px;">
+      <div style="flex:1;" class="df-row">
+        <div class="df-agent" style="font-size:11px;">🔍 Research Agent</div>
+        <div class="df-arrow" style="width:30px;">→</div>
+        <div class="df-data" style="font-size:10px;">
+          <span class="df-key">research_brief</span>
+          <span class="df-key">trending_topics[]</span>
+          <span class="df-key">content_opportunities[]</span>
+          <br><span style="color:var(--gray);">Sources: Reddit, Google Trends, News API, Quora, Instagram, LinkedIn</span>
+        </div>
+      </div>
+      <div style="flex:1;" class="df-row">
+        <div class="df-agent" style="font-size:11px;">🕵️ Competitor Tracker</div>
+        <div class="df-arrow" style="width:30px;">→</div>
+        <div class="df-data" style="font-size:10px;">
+          <span class="df-key">competitor_brief</span>
+          <span class="df-key">content_gaps[]</span>
+          <span class="df-key">competitor_themes[]</span>
+          <br><span style="color:var(--gray);">Up to 5 competitor handles analyzed</span>
+        </div>
+      </div>
+    </div>
+    <div style="padding-left:80px;color:var(--violet);font-size:14px;margin:4px 0;">↓ (both sub-agents merge here)</div>
+
+    <div class="df-row">
+      <div class="df-agent">📈 Growth Planner</div>
+      <div class="df-arrow">→</div>
+      <div class="df-data">
+        <strong>Receives:</strong> <span class="df-key">analyst_report</span> <span class="df-key">research_brief</span> <span class="df-key">competitor_brief</span> <span class="df-key">brand_profile</span> <span class="df-key">learning_log</span><br>
+        <strong>Outputs:</strong>
+        <span class="df-key">growth_plan</span>
+        <span class="df-key">content_pillars[]</span>
+        <span class="df-key">topic_ideas[]</span>
+        <span class="df-key">follower_target</span>
+        <span class="df-key">ppt_url</span>
+        <br><span style="font-size:10px;color:var(--gray);margin-top:4px;display:block;">Generates: 15-slide PPTX with brand colors + logo (python-pptx service) · Reads Brand Learning Log for cumulative learning</span>
+      </div>
+    </div>
+    <div style="padding-left:80px;color:var(--violet);font-size:14px;margin:4px 0;">↓</div>
+
+    <div class="df-row">
+      <div class="df-agent">📅 Strategist</div>
+      <div class="df-arrow">→</div>
+      <div class="df-data">
+        <strong>Receives:</strong> <span class="df-key">growth_plan</span> <span class="df-key">content_pillars[]</span> <span class="df-key">analyst_report.best_posting_times</span> <span class="df-key">planning_period</span><br>
+        <strong>Outputs:</strong>
+        <span class="df-key">content_calendar[]</span>
+        <span class="df-key">posting_schedule</span>
+        <span class="df-key">content_type_per_topic</span>
+        <span class="df-key">strategy_xlsx_url</span>
+        <br><span style="font-size:10px;color:var(--gray);margin-top:4px;display:block;">Generates: Color-coded Excel (openpyxl) with 15 or 30 rows, one per post</span>
+      </div>
+    </div>
+    <div style="padding-left:80px;color:var(--violet);font-size:14px;margin:4px 0;">↓</div>
+
+    <div class="df-row">
+      <div class="df-agent">✍️ Copywriter</div>
+      <div class="df-arrow">→</div>
+      <div class="df-data">
+        <strong>Receives:</strong> <span class="df-key">content_calendar[]</span> <span class="df-key">brand_profile</span> <span class="df-key">brand_voice[]</span> <span class="df-key">brand_guidelines_chunks</span><br>
+        <strong>Outputs per post:</strong>
+        <span class="df-key">hook[3]</span>
+        <span class="df-key">script</span>
+        <span class="df-key">carousel_slides[]</span>
+        <span class="df-key">caption_short</span>
+        <span class="df-key">caption_long</span>
+        <span class="df-key">hashtags[30]</span>
+        <span class="df-key">seo_keywords[5]</span>
+        <span class="df-key">visual_brief</span>
+        <span class="df-key">copywriter_xlsx_url</span>
+      </div>
+    </div>
+    <div style="padding-left:80px;color:var(--violet);font-size:14px;margin:4px 0;">↓</div>
+
+    <div class="df-row">
+      <div class="df-agent">🎨 Designer</div>
+      <div class="df-arrow">→</div>
+      <div class="df-data">
+        <strong>Receives:</strong> <span class="df-key">copywriter_output[carousel_posts]</span> <span class="df-key">copywriter_output[graphic_posts]</span> <span class="df-key">brand_colors</span> <span class="df-key">brand_logo</span> <span class="df-key">visual_brief[]</span><br>
+        <strong>Outputs:</strong>
+        <span class="df-key">carousel_slide_pngs[][]</span>
+        <span class="df-key">graphic_pngs[]</span>
+        <span class="df-key">zip_download_url</span>
+        <span class="df-key">design_status_per_post</span>
+        <br><span style="font-size:10px;color:var(--gray);margin-top:4px;display:block;">Uses: DALL-E 3 / Ideogram API for generation · Pillow for brand overlay + logo watermark · S3 for storage</span>
+      </div>
+    </div>
+
+    <div style="margin-top:32px;padding:20px;background:rgba(108,60,225,0.08);border:1px dashed rgba(108,60,225,0.3);border-radius:12px;">
+      <div style="font-size:13px;font-weight:700;color:var(--violet-light);margin-bottom:12px;">🔄 15-Day Self-Learning Loop — Data Flow</div>
+      <div style="display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:0;align-items:center;">
+        <div style="background:rgba(30,22,64,0.7);border-radius:8px;padding:12px;text-align:center;">
+          <div style="font-size:11px;font-weight:600;color:var(--white);">Analyst Re-runs</div>
+          <div style="font-size:10px;color:var(--gray);margin-top:4px;">Pulls new 15-day Instagram data, compares against what was planned</div>
+        </div>
+        <div style="font-size:20px;color:var(--violet);padding:0 12px;">→</div>
+        <div style="background:rgba(30,22,64,0.7);border-radius:8px;padding:12px;text-align:center;">
+          <div style="font-size:11px;font-weight:600;color:var(--white);">Performance Report Generated</div>
+          <div style="font-size:10px;color:var(--gray);margin-top:4px;">Winner/loser pillars identified, follower growth vs goal measured</div>
+        </div>
+        <div style="font-size:20px;color:var(--violet);padding:0 12px;">→</div>
+        <div style="background:rgba(30,22,64,0.7);border-radius:8px;padding:12px;text-align:center;">
+          <div style="font-size:11px;font-weight:600;color:var(--white);">Growth Planner Recalibrates</div>
+          <div style="font-size:10px;color:var(--gray);margin-top:4px;">Drops underperforming topics, scales winning ones. New PPT + Calendar + Scripts + Designs generated.</div>
+        </div>
+      </div>
+      <div style="text-align:center;margin-top:12px;">
+        <span class="df-key" style="font-size:11px;">brand_learning_log</span> updated with cycle learnings → read by Growth Planner in all future runs
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════ -->
+<!--  SECTION 4: TECH STACK                          -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="techstack" class="section">
+  <div class="section-title">Tech Stack</div>
+  <div class="section-sub">Every technology choice and why it was selected</div>
+
+  <div class="tech-grid">
+    <div class="tech-card">
+      <div class="tech-cat">Frontend</div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">Next.js 15</div><div class="tech-why">App Router, SSR, built-in API routes</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">Tailwind CSS + shadcn/ui</div><div class="tech-why">Rapid component dev, design system</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">Zustand + React Query</div><div class="tech-why">State management + server sync</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">Recharts</div><div class="tech-why">Instagram metrics visualization</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">Framer Motion</div><div class="tech-why">Glass morphism animations</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">SSE (Server-Sent Events)</div><div class="tech-why">Real-time agent progress streaming</div></div></div>
+    </div>
+
+    <div class="tech-card">
+      <div class="tech-cat">Backend & Agents</div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">Node.js + Fastify</div><div class="tech-why">High-throughput REST API layer</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">Python + LangGraph</div><div class="tech-why">Multi-agent DAG orchestration</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">GPT-4o (primary)</div><div class="tech-why">Agent reasoning + structured output</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">Claude 3.5 (fallback)</div><div class="tech-why">Long-context brand doc analysis</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">DALL-E 3 + Ideogram</div><div class="tech-why">Designer Agent image generation</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">Pillow (Python)</div><div class="tech-why">Brand overlay, logo watermark on images</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">BullMQ + Redis</div><div class="tech-why">15-day cron jobs, job queues</div></div></div>
+    </div>
+
+    <div class="tech-card">
+      <div class="tech-cat">Data & Storage</div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">PostgreSQL 16 (Supabase)</div><div class="tech-why">Primary relational DB + Auth</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">pgvector</div><div class="tech-why">Brand knowledge embeddings (semantic retrieval)</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">Redis (Upstash)</div><div class="tech-why">Cache, sessions, rate limits</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">AWS S3 / Cloudflare R2</div><div class="tech-why">Generated PPT, Excel, PNG files</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">Prisma ORM</div><div class="tech-why">Type-safe DB queries</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">text-embedding-3-large</div><div class="tech-why">OpenAI model for brand doc embeddings</div></div></div>
+    </div>
+
+    <div class="tech-card">
+      <div class="tech-cat">External APIs</div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">Meta Graph API v19</div><div class="tech-why">Instagram analytics (Analyst Agent)</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">News API (newsapi.org)</div><div class="tech-why">Industry news for Research Agent</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">PRAW (Reddit API)</div><div class="tech-why">Reddit subreddit trend scraping</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">pytrends (Google Trends)</div><div class="tech-why">Trend interest data for niche keywords</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">Apify</div><div class="tech-why">Instagram public hashtag scraper + Quora</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">Playwright</div><div class="tech-why">Headless browser for website crawl</div></div></div>
+    </div>
+
+    <div class="tech-card">
+      <div class="tech-cat">File Generation</div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">python-pptx</div><div class="tech-why">PPTX generation with brand colors, charts, logo</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">openpyxl</div><div class="tech-why">Excel content calendar + brief file</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">matplotlib</div><div class="tech-why">Chart images embedded in PPT slides</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">Pillow / PIL</div><div class="tech-why">Image post-processing, brand overlays</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">PyPDF2</div><div class="tech-why">Brand guidelines PDF text extraction</div></div></div>
+    </div>
+
+    <div class="tech-card">
+      <div class="tech-cat">Infrastructure</div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">Vercel</div><div class="tech-why">Next.js frontend deployment</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">Railway</div><div class="tech-why">Node.js API + Python agent workers</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">Cloudflare CDN</div><div class="tech-why">Asset delivery, DDoS protection</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">Sentry</div><div class="tech-why">Error tracking (frontend + backend)</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">PostHog</div><div class="tech-why">Product analytics, funnel tracking</div></div></div>
+      <div class="tech-item"><div class="tech-dot"></div><div><div class="tech-name">GitHub Actions</div><div class="tech-why">CI/CD pipeline</div></div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function showSection(id) {
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+    event.target.classList.add('active');
+  }
+</script>
+</body>
+</html>

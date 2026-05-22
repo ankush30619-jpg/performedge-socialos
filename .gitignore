@@ -1,0 +1,70 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Next.js
+frontend/.next/
+frontend/out/
+frontend/build/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+agents/__pycache__/
+agents/.venv/
+agents/venv/
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Output files
+output/
+visuals/
+brands/*_analyst_*.json
+brands/*_strategy*.json
+brands/*_competitors.json
+brands/*_trends.json
+
+# Secrets / keys
+*.pem
+*.key
+
+# Prisma
+backend/node_modules/
+frontend/node_modules/
+
+# Backend dist (built on server)
+backend/dist/
+
+# Temp files
+*.log
+ngrok.log
+mishika_brand.json

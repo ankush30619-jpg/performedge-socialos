@@ -1,0 +1,212 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  role         String   @default("admin")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  brands       Brand[]
+  agentRuns    AgentRun[]
+
+  @@map("users")
+}
+
+model Brand {
+  id             String   @id @default(cuid())
+
+  // ── Section 1: Core Identity ─────────────────────────────────────────────
+  name           String
+  niche          String?                  // specific niche e.g. "AI tools for creators"
+  industry       String?                  // broader industry category
+  website        String?
+  instagramUrl   String?                  // public IG profile URL
+  language       String?                  // primary language/dialect e.g. "Hinglish"
+  positioning    String?                  // one-line brand positioning
+  differentiation String?                 // what makes them unique vs competitors
+  brandStory     String?                  // origin story, journey, struggles, wins
+  credentials    String?                  // proof: followers, revenue, results
+
+  // ── Section 2: Brand Identity ─────────────────────────────────────────────
+  logoUrl        String?
+  guidelinesUrl  String?
+  colors         Json?                    // { primary, secondary, accent, palette: [] }
+  campaignUrls   Json?                    // [{ name, url, type }] uploaded campaigns
+  brandMediaUrls Json?                    // [{ name, url, type }] uploaded media assets
+
+  // ── Section 3: Target Audience ────────────────────────────────────────────
+  targetAudience  String?                 // brief description
+  audienceAge     String?                 // e.g. "18-35 years"
+  audienceProfession String?              // e.g. "D2C founders, SaaS marketers"
+  audiencePainPoints String?              // main problems they face
+  audienceLevel   String?                 // Beginners / Intermediate / Advanced
+  audienceLanguage String?                // English/Hindi/Hinglish ratio
+  audienceAspirations String?             // what they want to become after watching
+  audiencePersona Json?                   // [{ name, age, job, goals, frustrations }]
+
+  // ── Section 4: Voice & Style ──────────────────────────────────────────────
+  tone            String?                 // Professional / Casual / Witty / Bold etc.
+  voiceStyle      String?                 // tum / aap / you
+  catchphrases    String?                 // signature phrases to always use
+  forbiddenWords  String?                 // words/phrases to never use
+  usesSlang       Boolean?                // uses slang/memes/cursing
+  hookStyle       String?                 // how content starts (hook style)
+  ctaStyle        String?                 // how content ends (CTA style)
+
+  // ── Section 5: Content Strategy ───────────────────────────────────────────
+  contentPillars  Json?                   // ["Pillar 1", "Pillar 2", ...]
+  idealVideoLength String?                // 15s / 30s / 45s / 60s / 90s
+  hookFormulas    String?                 // proven hook formulas that work
+  bestHooks       String?                 // top 3 best-performing video hooks
+  worstContent    String?                 // what has NOT worked and why
+  competitors     Json?                   // [{ name, handle, notes }]
+
+  // ── Instagram connection ──────────────────────────────────────────────────
+  igAccountId      String?
+  igUsername       String?
+  igAccessToken    String?               // AES-256-GCM encrypted
+  igTokenExpiresAt DateTime?
+  igFollowers      Int?
+
+  // ── AI Knowledge (self-learning) ─────────────────────────────────────────
+  knowledgeJson  Json?
+
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  agentRuns      AgentRun[]
+  analyticsReports AnalyticsReport[]
+  learningLogs   BrandLearningLog[]
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("brands")
+}
+
+model AgentRun {
+  id             String   @id @default(cuid())
+  brandId        String
+  brand          Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User     @relation(fields: [userId], references: [id])
+
+  status         String   @default("pending") // pending | running | completed | failed | stopped
+  mode           String   @default("full")
+  daysAhead      Int      @default(15)
+
+  // Agent statuses stored as JSON
+  // { brandManager: {status, message}, analyst: {...}, ... }
+  agentStatuses  Json     @default("{}")
+
+  // Output URLs
+  pptUrl         String?
+  excelUrl       String?
+  postsGenerated Int      @default(0)
+
+  // Posts (content calendar items)
+  posts          Post[]
+
+  // Design assets
+  designAssets   DesignAsset[]
+
+  // Raw output data
+  strategyJson   Json?
+  analystReport  Json?
+
+  startedAt      DateTime?
+  completedAt    DateTime?
+  errorMessage   String?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("agent_runs")
+}
+
+model Post {
+  id          String   @id @default(cuid())
+  agentRunId  String
+  agentRun    AgentRun @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+
+  date          DateTime
+  contentType   String   // Reel | AI Reel | Carousel | Graphic | Story
+  topic         String
+  caption       String?
+  hashtags      String[] @default([])
+  status        String   @default("draft") // draft | approved | scheduled | published | rejected
+  scheduledAt   DateTime?  // when to auto-publish (null = not scheduled)
+  publishedAt   DateTime?  // when actually published
+  igMediaId     String?    // IG media ID after publish
+  scheduleJobId String?    // BullMQ job ID for cancellation
+
+  createdAt   DateTime @default(now())
+
+  @@map("posts")
+}
+
+model DesignAsset {
+  id          String   @id @default(cuid())
+  agentRunId  String
+  agentRun    AgentRun @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+
+  imageUrl    String
+  contentType String
+  topic       String?
+  prompt      String?
+  date        DateTime?
+
+  createdAt   DateTime @default(now())
+
+  @@map("design_assets")
+}
+
+model AnalyticsReport {
+  id               String   @id @default(cuid())
+  brandId          String
+  brand            Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  // Core metrics
+  followerCount    Int?
+  avgReach         Float?
+  avgEngagementRate Float?
+  postsAnalyzed    Int?
+
+  // Growth deltas
+  followerGrowthPct Float?
+  reachGrowthPct    Float?
+  engagementGrowthPct Float?
+
+  // Top posts as JSON array
+  topPosts         Json?
+
+  // Raw report from analyst agent
+  rawReport        Json?
+
+  createdAt        DateTime @default(now())
+
+  @@map("analytics_reports")
+}
+
+model BrandLearningLog {
+  id        String   @id @default(cuid())
+  brandId   String
+  brand     Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  trigger   String   // manual | cron_15d | post_run
+  summary   String?
+  rawData   Json?
+
+  createdAt DateTime @default(now())
+
+  @@map("brand_learning_logs")
+}
