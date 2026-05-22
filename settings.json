@@ -1,0 +1,16 @@
+{
+  "gemini_api_key": "YOUR_GEMINI_API_KEY",
+  "model": "gemini-2.5-flash-lite",
+  "apify_token": "YOUR_APIFY_TOKEN",
+  "groq_api_key": "YOUR_GROQ_API_KEY",
+  "news_api_key": "YOUR_NEWS_API_KEY",
+  "freepik_api_key": "YOUR_FREEPIK_API_KEY",
+  "freepik_engine": "mystic",
+  "tavily_api_key": "YOUR_TAVILY_API_KEY",
+  "agency_name": "PerformEdge",
+  "agency_logo_primary": "assets/agency/performedge_primary.png",
+  "agency_logo_white": "assets/agency/performedge_white.png",
+  "agency_logo_black": "assets/agency/performedge_black.jpg",
+  "llm_provider": "groq",
+  "groq_model": "llama-3.3-70b-versatile"
+}

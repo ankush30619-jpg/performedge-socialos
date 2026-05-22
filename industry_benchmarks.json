@@ -1,0 +1,112 @@
+{
+  "_meta": {
+    "version": 1,
+    "updated": "2026-05-15",
+    "source": "Curated baseline from 2025-26 industry reports (HypeAuditor, RivalIQ, Socialinsider, Later, Meta benchmarks). Refreshed periodically via Tavily.",
+    "notes": "All ranges are for Instagram unless noted. Engagement rate = (likes + comments + saves) / followers. Reach % = unique reach / followers."
+  },
+
+  "categories": {
+    "Home Appliances Brand": {
+      "engagement_rate_pct": {"poor": 0.4, "median": 0.9, "good": 1.6, "excellent": 2.5},
+      "follower_growth_monthly_pct": {"poor": 0.5, "median": 3, "good": 8, "excellent": 18},
+      "reach_per_post_pct_followers": {"poor": 10, "median": 28, "good": 50, "excellent": 80},
+      "save_rate_pct_reach": {"poor": 0.3, "median": 1.0, "good": 2.5, "excellent": 5.0},
+      "best_formats_in_order": ["Reel", "AI Reel", "Carousel", "Static Graphic", "Story"],
+      "best_posting_window_local": "18:00-21:30",
+      "best_days_of_week": ["Saturday", "Sunday", "Wednesday", "Friday"],
+      "avg_posts_per_week": {"low": 3, "median": 5, "high": 7},
+      "hashtag_count_recommendation": {"min": 3, "ideal": 4, "max": 8},
+      "story_completion_rate_pct": {"poor": 50, "median": 70, "good": 82, "excellent": 90},
+      "notes": "Reels dominate reach. Emotional storytelling consistently outperforms product hero shots by 2.3x in this category."
+    },
+
+    "Migration Agency": {
+      "engagement_rate_pct": {"poor": 0.8, "median": 2.1, "good": 3.8, "excellent": 6.0},
+      "follower_growth_monthly_pct": {"poor": 1, "median": 5, "good": 12, "excellent": 25},
+      "reach_per_post_pct_followers": {"poor": 15, "median": 35, "good": 60, "excellent": 100},
+      "save_rate_pct_reach": {"poor": 1.5, "median": 4.0, "good": 8.0, "excellent": 14.0},
+      "best_formats_in_order": ["Carousel", "Reel", "Story", "Static Graphic", "AI Reel"],
+      "best_posting_window_local": "08:00-10:00, 19:00-21:00",
+      "best_days_of_week": ["Tuesday", "Wednesday", "Sunday", "Thursday"],
+      "avg_posts_per_week": {"low": 4, "median": 6, "high": 8},
+      "hashtag_count_recommendation": {"min": 5, "ideal": 8, "max": 15},
+      "story_completion_rate_pct": {"poor": 55, "median": 72, "good": 85, "excellent": 92},
+      "notes": "Educational carousels (visa subclass explainers, PR timelines) and real client win posts dominate. Saves are the leading indicator — high-save posts predict consultation DMs at ~3.2x rate of likes."
+    },
+
+    "D2C": {
+      "engagement_rate_pct": {"poor": 0.5, "median": 1.2, "good": 2.4, "excellent": 4.0},
+      "follower_growth_monthly_pct": {"poor": 1, "median": 4, "good": 10, "excellent": 22},
+      "reach_per_post_pct_followers": {"poor": 12, "median": 30, "good": 55, "excellent": 90},
+      "save_rate_pct_reach": {"poor": 0.5, "median": 1.5, "good": 3.5, "excellent": 7.0},
+      "best_formats_in_order": ["Reel", "Carousel", "AI Reel", "Static Graphic", "Story"],
+      "best_posting_window_local": "12:00-14:00, 19:00-22:00",
+      "best_days_of_week": ["Sunday", "Saturday", "Wednesday"],
+      "avg_posts_per_week": {"low": 4, "median": 6, "high": 9},
+      "hashtag_count_recommendation": {"min": 3, "ideal": 5, "max": 10},
+      "notes": "UGC + lifestyle storytelling > product hero. Behind-the-scenes performs unusually well."
+    },
+
+    "F&B": {
+      "engagement_rate_pct": {"poor": 0.6, "median": 1.5, "good": 3.0, "excellent": 5.5},
+      "follower_growth_monthly_pct": {"poor": 1, "median": 5, "good": 12, "excellent": 28},
+      "reach_per_post_pct_followers": {"poor": 15, "median": 35, "good": 65, "excellent": 110},
+      "save_rate_pct_reach": {"poor": 0.5, "median": 1.8, "good": 4.2, "excellent": 8.5},
+      "best_formats_in_order": ["Reel", "Carousel", "Static Graphic", "AI Reel", "Story"],
+      "best_posting_window_local": "11:00-13:00, 18:00-21:00",
+      "best_days_of_week": ["Friday", "Saturday", "Sunday"],
+      "avg_posts_per_week": {"low": 5, "median": 7, "high": 10},
+      "hashtag_count_recommendation": {"min": 3, "ideal": 5, "max": 12},
+      "notes": "Hyperlocal hashtags + close-up food shots drive saves. Behind-the-kitchen reels go viral."
+    },
+
+    "Healthcare / Clinic": {
+      "engagement_rate_pct": {"poor": 0.5, "median": 1.4, "good": 2.8, "excellent": 4.8},
+      "follower_growth_monthly_pct": {"poor": 0.5, "median": 3, "good": 8, "excellent": 18},
+      "reach_per_post_pct_followers": {"poor": 12, "median": 30, "good": 55, "excellent": 90},
+      "save_rate_pct_reach": {"poor": 1.0, "median": 3.5, "good": 7.0, "excellent": 13.0},
+      "best_formats_in_order": ["Carousel", "Reel", "Static Graphic", "Story", "AI Reel"],
+      "best_posting_window_local": "09:00-11:00, 18:00-20:00",
+      "best_days_of_week": ["Tuesday", "Wednesday", "Thursday", "Saturday"],
+      "avg_posts_per_week": {"low": 3, "median": 5, "high": 7},
+      "hashtag_count_recommendation": {"min": 5, "ideal": 8, "max": 15},
+      "notes": "Educational content (symptom explainers, prevention tips) and patient outcome stories drive most engagement and DMs."
+    },
+
+    "Education / Coaching": {
+      "engagement_rate_pct": {"poor": 0.7, "median": 1.8, "good": 3.4, "excellent": 5.5},
+      "follower_growth_monthly_pct": {"poor": 1, "median": 4, "good": 10, "excellent": 22},
+      "reach_per_post_pct_followers": {"poor": 14, "median": 32, "good": 58, "excellent": 95},
+      "save_rate_pct_reach": {"poor": 1.5, "median": 4.0, "good": 8.5, "excellent": 15.0},
+      "best_formats_in_order": ["Carousel", "Reel", "Static Graphic", "Story", "AI Reel"],
+      "best_posting_window_local": "07:00-09:00, 17:00-20:00",
+      "best_days_of_week": ["Monday", "Tuesday", "Wednesday", "Sunday"],
+      "avg_posts_per_week": {"low": 4, "median": 6, "high": 8},
+      "hashtag_count_recommendation": {"min": 5, "ideal": 8, "max": 15},
+      "notes": "Listicles + study tips + success stories. Saves are the strongest leading indicator of conversion."
+    },
+
+    "Default": {
+      "engagement_rate_pct": {"poor": 0.5, "median": 1.2, "good": 2.4, "excellent": 4.5},
+      "follower_growth_monthly_pct": {"poor": 1, "median": 4, "good": 10, "excellent": 22},
+      "reach_per_post_pct_followers": {"poor": 12, "median": 30, "good": 55, "excellent": 90},
+      "save_rate_pct_reach": {"poor": 0.5, "median": 1.5, "good": 3.5, "excellent": 7.0},
+      "best_formats_in_order": ["Reel", "Carousel", "Static Graphic", "Story", "AI Reel"],
+      "best_posting_window_local": "18:00-21:00",
+      "best_days_of_week": ["Saturday", "Sunday", "Wednesday"],
+      "avg_posts_per_week": {"low": 4, "median": 6, "high": 8},
+      "hashtag_count_recommendation": {"min": 3, "ideal": 5, "max": 10},
+      "notes": "Generic baselines used when category isn't explicitly mapped."
+    }
+  },
+
+  "category_aliases": {
+    "Home Appliances Brand": ["home appliances", "appliance", "consumer durables", "electronics brand", "home & kitchen", "kitchen appliance"],
+    "Migration Agency": ["migration", "immigration", "visa", "education consult", "study abroad"],
+    "D2C": ["d2c", "skincare", "beauty", "fashion", "apparel", "wellness", "personal care", "cosmetic"],
+    "F&B": ["restaurant", "cafe", "food", "beverage", "f&b", "bakery", "cloud kitchen", "fmcg"],
+    "Healthcare / Clinic": ["clinic", "dental", "healthcare", "hospital", "doctor", "wellness clinic", "aesthetic"],
+    "Education / Coaching": ["coaching", "edutech", "school", "college", "university", "education", "tutor", "academy"]
+  }
+}
