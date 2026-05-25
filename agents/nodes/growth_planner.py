@@ -215,23 +215,52 @@ def _build_ig_audit(analyst_report: dict, brand: dict) -> dict:
 async def _generate_strategy(brand, brand_knowledge, analyst_report, research_data, competitor_data, ig_audit, days_ahead) -> dict:
     oai = _get_oai()
     if not oai:
-        return _fallback_strategy(days_ahead)
+        return _fallback_strategy(brand, days_ahead)
 
-    niche    = brand.get("niche", "")
-    name     = brand.get("name", "brand")
-    tone     = brand.get("tone", "Professional")
-    audience = brand.get("targetAudience", "")
+    niche           = brand.get("niche", "")
+    name            = brand.get("name", "brand")
+    tone            = brand.get("tone", "Professional")
+    audience        = brand.get("targetAudience", "")
+    positioning     = brand.get("positioning", "")
+    differentiation = brand.get("differentiation", "")
+    voice_style     = brand.get("voiceStyle", "")
+    hook_style      = brand.get("hookStyle", "")
+    cta_style       = brand.get("ctaStyle", "")
+    catchphrases    = brand.get("catchphrases", "")
+    content_pillars = brand.get("contentPillars") or []
+    audience_pain   = brand.get("audiencePainPoints", "")
+    context_block   = brand_knowledge.get("context_block", "")
 
-    trends_text  = "\n".join(f"- {t.get('title','')}" for t in research_data.get("trends", [])[:5])
-    gaps_text    = "\n".join(f"- {g}" for g in competitor_data.get("content_gaps", [])[:3])
+    # Research insights
+    trending_angles  = research_data.get("trending_angles", [])
+    content_opps     = research_data.get("content_opportunities", [])
+    hook_ideas       = research_data.get("hook_ideas", [])
+    posting_insights = research_data.get("posting_insights", [])
+
+    # Competitor insights
+    comp_gaps        = competitor_data.get("content_gaps", [])
+    diff_strategy    = competitor_data.get("differentiation_strategy", "")
+    formats_to_own   = competitor_data.get("content_formats_to_own", [])
+
+    # IG performance data
     working_text = "\n".join(
-        f"- [{p['mediaType']}] {p['caption']} | ER: {p['er']}% | Reach: {p['reach']}"
-        for p in ig_audit.get("working_posts", [])[:3]
+        f"- [{p['mediaType']}] \"{p['caption']}\" | ER: {p['er']}% | Reach: {p['reach']:,}"
+        for p in ig_audit.get("working_posts", [])[:4]
     )
     not_working_text = "\n".join(
-        f"- [{p['mediaType']}] {p['caption']} | ER: {p['er']}% | Reach: {p['reach']}"
+        f"- [{p['mediaType']}] \"{p['caption']}\" | ER: {p['er']}% | Reach: {p['reach']:,}"
         for p in ig_audit.get("not_working_posts", [])[:3]
     )
+    trends_text      = "\n".join(f"- {t}" for t in trending_angles[:5]) or "\n".join(
+        f"- {t.get('title','')}" for t in research_data.get("trends", [])[:5]
+    )
+    gaps_text        = "\n".join(f"- {g}" for g in comp_gaps[:4])
+    posting_text     = "\n".join(f"- {p}" for p in posting_insights[:3])
+
+    ig_connected = ig_audit.get("ig_connected", False)
+    followers    = ig_audit.get("followers", 0)
+    goal         = ig_audit.get("goal_followers", 0)
+    gap          = ig_audit.get("follower_gap", 0)
 
     try:
         resp = await oai.chat.completions.create(
@@ -240,47 +269,77 @@ async def _generate_strategy(brand, brand_knowledge, analyst_report, research_da
                 {
                     "role": "system",
                     "content": (
-                        "You are a senior Instagram growth strategist. "
-                        "Create specific, data-driven growth strategies in JSON. "
-                        "Use actual performance data to guide recommendations."
+                        f"You are a senior Instagram growth strategist working exclusively for {name}. "
+                        f"You have deep expertise in {niche} and know this brand inside out. "
+                        f"Create a hyper-specific, data-informed growth strategy that feels tailor-made — "
+                        f"not a generic template. Every recommendation must reference the brand's actual "
+                        f"positioning, voice, and audience.\n\n"
+                        f"{context_block[:600] if context_block else ''}"
                     ),
                 },
                 {
                     "role": "user",
                     "content": (
-                        f"Build a {days_ahead}-day Instagram growth strategy for:\n"
-                        f"Brand: {name} | Niche: {niche} | Tone: {tone} | Audience: {audience}\n\n"
-                        f"REAL Instagram Performance:\n"
-                        f"- Followers: {ig_audit['followers']:,} → Goal: {ig_audit['goal_followers']:,} (+{ig_audit['follower_gap']})\n"
-                        f"- Avg Engagement Rate: {ig_audit['avg_er']}%\n"
-                        f"- Avg Reach per Post: {ig_audit['avg_reach']:,}\n"
-                        f"- Best Content Type: {ig_audit['best_content_type']}\n\n"
-                        f"TOP PERFORMING POSTS (What's Working):\n{working_text or 'No data — use niche best practices'}\n\n"
-                        f"UNDERPERFORMING POSTS (What's Not Working):\n{not_working_text or 'No data'}\n\n"
-                        f"Current Trends:\n{trends_text or 'General social media trends'}\n\n"
-                        f"Competitor Content Gaps:\n{gaps_text or 'N/A'}\n\n"
-                        "Return JSON with keys:\n"
-                        "pillars: list of 4 content pillars (derived from what works)\n"
-                        "posting_frequency: string like '1-2x daily'\n"
-                        "best_times: list of 3 best posting times\n"
-                        "content_mix: object with Reel/Carousel/Graphic/Story/AI Reel as percentages summing to 100\n"
-                        "monthly_themes: list of 2-3 monthly theme ideas\n"
-                        "growth_tactics: list of 5 specific tactics to reach follower goal\n"
-                        "hashtag_strategy: string describing hashtag approach\n"
-                        "cta_templates: list of 3 CTA templates\n"
-                        "what_works: list of 3 specific insights from top performing posts\n"
-                        "what_to_stop: list of 3 things to stop based on underperforming posts\n"
-                        "follower_plan: object with week1/week2/week3/week4 as target follower counts"
+                        f"Build a comprehensive {days_ahead}-day Instagram growth strategy for {name}.\n\n"
+                        f"=== BRAND CONTEXT ===\n"
+                        f"Niche: {niche} | Tone: {tone} | Audience: {audience}\n"
+                        + (f"Positioning: {positioning}\n" if positioning else "")
+                        + (f"Differentiator: {differentiation}\n" if differentiation else "")
+                        + (f"Voice style: {voice_style}\n" if voice_style else "")
+                        + (f"Hook style: {hook_style}\n" if hook_style else "")
+                        + (f"CTA style: {cta_style}\n" if cta_style else "")
+                        + (f"Catchphrases: {catchphrases}\n" if catchphrases else "")
+                        + (f"Audience pain points: {audience_pain}\n" if audience_pain else "")
+                        + (f"Existing content pillars: {', '.join(str(p) for p in content_pillars)}\n" if content_pillars else "")
+                        + f"\n=== INSTAGRAM PERFORMANCE DATA ===\n"
+                        + (
+                            f"LIVE DATA from @{analyst_report.get('username', name)}:\n"
+                            f"- Current Followers: {followers:,} → Goal: {goal:,} (need +{gap:,})\n"
+                            f"- Avg Engagement Rate: {ig_audit['avg_er']}% (industry avg: 1.5-3%)\n"
+                            f"- Avg Reach per Post: {ig_audit['avg_reach']:,}\n"
+                            f"- Best Content Type: {ig_audit['best_content_type']}\n"
+                            f"- Posts Analysed: {ig_audit['posts_analysed']}\n"
+                            if ig_connected else
+                            f"No IG connected — building strategy from brand context + niche research\n"
+                            f"Follower goal: {goal:,}\n"
+                        )
+                        + f"\nWHAT'S WORKING (replicate this formula):\n{working_text or 'No live data — use niche best practices'}\n\n"
+                        + f"WHAT'S NOT WORKING (stop/pivot these):\n{not_working_text or 'No live data'}\n\n"
+                        + f"=== MARKET RESEARCH ===\n"
+                        + f"Trending content angles for {niche}:\n{trends_text or 'N/A'}\n\n"
+                        + f"Competitor content gaps to fill:\n{gaps_text or 'N/A'}\n\n"
+                        + (f"Content formats to own: {', '.join(formats_to_own)}\n\n" if formats_to_own else "")
+                        + (f"Posting insights: {posting_text}\n\n" if posting_text else "")
+                        + (f"Differentiation strategy: {diff_strategy}\n\n" if diff_strategy else "")
+                        + f"Return JSON with these keys (all specific to {name}/{niche}, not generic):\n"
+                        + f"pillars: list of 4 content pillars — derived from what's working + brand positioning + audience needs\n"
+                        + f"posting_frequency: string like '1-2x daily'\n"
+                        + f"best_times: list of 3 specific posting times for {niche} audience\n"
+                        + f"content_mix: object — Reel/Carousel/Graphic/Story/AI Reel as percentages summing to 100 "
+                        + f"(weight towards best_content_type: {ig_audit.get('best_content_type','Reel')})\n"
+                        + f"monthly_themes: list of 3 specific monthly theme ideas tied to {niche} seasons/trends\n"
+                        + f"growth_tactics: list of 6 SPECIFIC, actionable tactics to reach +{gap or 100} followers — "
+                        + f"each tactic must reference {name}'s specific niche and audience\n"
+                        + f"hashtag_strategy: string (2-3 sentences) on hashtag approach specific to {niche}\n"
+                        + f"cta_templates: list of 4 CTA templates that match {name}'s voice and {cta_style or tone}\n"
+                        + f"what_works: list of 4 specific, data-backed insights about what content is performing well\n"
+                        + f"what_to_stop: list of 3 specific things to stop or change based on performance data\n"
+                        + f"follower_plan: object with week1/week2/week3/week4 as realistic target follower counts "
+                        + f"(starting from {followers}, goal: {goal})\n"
+                        + f"engagement_tactics: list of 4 specific engagement tactics for {niche} community\n"
+                        + f"content_series_ideas: list of 3 recurring content series ideas specific to {name}/{niche}"
                     ),
                 },
             ],
             response_format={"type": "json_object"},
             temperature=0.5,
+            max_tokens=2500,
         )
         return json.loads(resp.choices[0].message.content)
     except Exception as e:
         print(f"[GrowthPlanner] GPT strategy error: {e}")
-        return _fallback_strategy(days_ahead)
+        import traceback; traceback.print_exc()
+        return _fallback_strategy(brand, days_ahead)
 
 
 # ── Growth Planner PPT ───────────────────────────────────────────────────────
@@ -521,35 +580,59 @@ def _upload_bytes(data: bytes, path: str, content_type: str):
         return None
 
 
-def _fallback_strategy(days_ahead: int) -> dict:
+def _fallback_strategy(brand: dict, days_ahead: int) -> dict:
+    niche   = brand.get("niche", "your niche")
+    name    = brand.get("name", "your brand")
+    content_pillars = brand.get("contentPillars") or []
+    pillars = content_pillars[:4] if content_pillars else [
+        "Brand Awareness", "Education & Value", "Engagement", "Social Proof"
+    ]
     return {
-        "pillars": ["Brand Awareness", "Education & Value", "Engagement", "Social Proof"],
-        "posting_frequency": "1x daily",
+        "pillars": pillars,
+        "posting_frequency": "1-2x daily",
         "best_times": ["9:00 AM", "12:30 PM", "6:00 PM"],
-        "content_mix": {"Reel": 40, "Carousel": 30, "Graphic": 20, "Story": 10},
-        "monthly_themes": ["Brand Story Month", "Customer Spotlight", "Industry Insights"],
-        "growth_tactics": [
-            "Post Reels daily for first 2 weeks for reach boost",
-            "Engage with 10 accounts daily in the niche",
-            "Use 15-20 targeted hashtags per post",
-            "Respond to all comments within 1 hour",
-            "Collaborate with micro-influencers in the niche",
+        "content_mix": {"Reel": 40, "Carousel": 30, "Graphic": 15, "Story": 10, "AI Reel": 5},
+        "monthly_themes": [
+            f"{name} Brand Story Month",
+            f"{niche} Client Spotlight",
+            f"{niche} Industry Insights",
         ],
-        "hashtag_strategy": "Mix broad (500K-1M posts) and niche (10K-100K posts) hashtags",
+        "growth_tactics": [
+            f"Post {niche}-specific Reels daily for first 2 weeks",
+            f"Engage with 15 accounts in {niche} community daily",
+            "Use 15-20 targeted hashtags per post (mix broad + niche)",
+            "Respond to all comments within 1 hour to boost distribution",
+            f"Collaborate with micro-influencers in {niche} space",
+            "Pin best-performing post as profile highlight",
+        ],
+        "hashtag_strategy": f"Use a mix of broad {niche} hashtags (500K-2M posts) and niche-specific ones (10K-200K posts) to balance reach and community discovery.",
         "cta_templates": [
-            "Save this for later! Which tip resonated most?",
-            "Tag someone who needs to see this!",
-            "Drop a emoji if you agree!",
+            "Save this — you'll want to come back to it! 🔖",
+            "Tag someone in {niche} who needs to see this!",
+            "Drop a comment below — what's your experience? 👇",
+            "Share this with your team! 🚀",
         ],
         "what_works": [
-            "Short-form Reels (15-30s) get highest engagement",
-            "Educational carousels drive saves and shares",
-            "Behind-the-scenes content builds authentic connection",
+            f"Short-form Reels (15-30s) with {niche}-specific hooks get highest reach",
+            "Educational carousels with a clear problem-solution structure drive saves",
+            "Behind-the-scenes and founder content builds authentic engagement",
+            "Posts that directly address audience pain points get more DMs",
         ],
         "what_to_stop": [
-            "Long static image posts without text overlay",
             "Generic motivational quotes without brand context",
-            "Posts without a clear CTA",
+            "Overly promotional posts without value delivery",
+            "Static images without text overlay or visual hook",
         ],
         "follower_plan": {"week1": 0, "week2": 0, "week3": 0, "week4": 0},
+        "engagement_tactics": [
+            "Reply to every comment within 1 hour of posting",
+            f"Engage daily in {niche} hashtag communities",
+            "Ask a specific question in every caption",
+            "Use polls/questions in Stories daily",
+        ],
+        "content_series_ideas": [
+            f"Weekly '{niche} myth vs reality' carousel",
+            f"'Behind the scenes at {name}' Reels series",
+            f"Monthly '{niche} wins' client spotlight",
+        ],
     }

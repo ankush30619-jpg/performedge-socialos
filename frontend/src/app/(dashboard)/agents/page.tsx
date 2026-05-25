@@ -82,12 +82,21 @@ export default function AgentsPage() {
           setIsPipelineActive(false);
           setPipelineDone(true);
           if (run.status === "completed") {
+            const pollPptUrl = run.pptUrl ?? activeRunRef.current?.pptUrl;
             setActiveRun({
               ...activeRunRef.current!,
-              pptUrl: run.pptUrl ?? activeRunRef.current?.pptUrl,
-              excelUrl: run.excelUrl ?? activeRunRef.current?.excelUrl,
+              pptUrl:         pollPptUrl,
+              excelUrl:       run.excelUrl ?? activeRunRef.current?.excelUrl,
               postsGenerated: run.postsGenerated ?? activeRunRef.current?.postsGenerated ?? 0,
             });
+            // Auto-download PPT if found via polling
+            if (pollPptUrl && !activeRunRef.current?.pptUrl) {
+              try {
+                const a = document.createElement("a");
+                a.href = pollPptUrl; a.target = "_blank"; a.rel = "noopener noreferrer";
+                document.body.appendChild(a); a.click(); document.body.removeChild(a);
+              } catch {}
+            }
           }
           if (timerRef.current) clearInterval(timerRef.current);
           refetchRuns();
@@ -159,13 +168,27 @@ export default function AgentsPage() {
           } else if (e.type === "pipeline_complete") {
             // Update activeRun with final outputs (use ref to avoid stale closure)
             const current = activeRunRef.current;
+            const finalPptUrl   = (e.data?.pptUrl as string | undefined)    ?? current?.pptUrl;
+            const finalExcelUrl = (e.data?.excelUrl as string | undefined)  ?? current?.excelUrl;
             if (e.data && current) {
               setActiveRun({
                 ...current,
-                pptUrl: (e.data?.pptUrl as string | undefined) ?? current.pptUrl,
-                excelUrl: (e.data?.excelUrl as string | undefined) ?? current.excelUrl,
+                pptUrl: finalPptUrl,
+                excelUrl: finalExcelUrl,
                 postsGenerated: (e.data?.postsGenerated as number | undefined) ?? current.postsGenerated,
               });
+            }
+            // Auto-download PPT when it's generated (browser will download .pptx automatically)
+            if (finalPptUrl) {
+              try {
+                const a = document.createElement("a");
+                a.href   = finalPptUrl;
+                a.target = "_blank";
+                a.rel    = "noopener noreferrer";
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+              } catch {}
             }
             sseRef.current?.close();
             setPipelineDone(true);
