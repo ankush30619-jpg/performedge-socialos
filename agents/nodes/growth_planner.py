@@ -94,7 +94,7 @@ async def growth_planner_node(state: SocialOSState, event_queue: asyncio.Queue) 
         "message": "Auditing Instagram performance — analysing every post…",
     })
 
-    ig_audit = _build_ig_audit(analyst_report, brand)
+    ig_audit = _build_ig_audit(analyst_report, brand, brand_knowledge)
 
     await event_queue.put({
         "type": "agent_progress",
@@ -149,13 +149,28 @@ async def growth_planner_node(state: SocialOSState, event_queue: asyncio.Queue) 
 
 # ── Instagram Audit ─────────────────────────────────────────────────────────
 
-def _build_ig_audit(analyst_report: dict, brand: dict) -> dict:
-    """Analyse the analyst_report to produce an Instagram audit dict."""
-    top_posts   = analyst_report.get("topPosts") or []
-    followers   = analyst_report.get("followerCount", 0) or 0
-    avg_er      = analyst_report.get("avgEngagementRate", 0) or 0
-    avg_reach   = analyst_report.get("avgReach", 0) or 0
+def _build_ig_audit(analyst_report: dict, brand: dict, brand_knowledge: dict = None) -> dict:
+    """Analyse the analyst_report to produce an Instagram audit dict.
+    Uses manual stats from brand_knowledge as fallback when IG is not connected."""
+    bk = brand_knowledge or {}
+    top_posts    = analyst_report.get("topPosts") or []
+    followers    = analyst_report.get("followerCount", 0) or 0
+    avg_er       = analyst_report.get("avgEngagementRate", 0) or 0
+    avg_reach    = analyst_report.get("avgReach", 0) or 0
     ig_connected = analyst_report.get("ig_connected", False)
+
+    # ── Manual stats fallback (when IG not connected) ──────────────────────
+    manual_followers     = bk.get("manualFollowers", 0) or 0
+    manual_follower_goal = bk.get("manualFollowerGoal", 0) or 0
+    manual_avg_likes     = bk.get("manualAvgLikes", 0) or 0
+    manual_avg_comments  = bk.get("manualAvgComments", 0) or 0
+
+    if followers == 0 and manual_followers > 0:
+        followers = manual_followers
+    if avg_er == 0 and manual_followers > 0 and manual_avg_likes > 0:
+        avg_er = round(((manual_avg_likes + manual_avg_comments) / manual_followers) * 100, 2)
+    if avg_reach == 0 and manual_followers > 0:
+        avg_reach = int(manual_followers * 0.15)
 
     # Classify posts as working / not working
     working     = []
@@ -186,10 +201,13 @@ def _build_ig_audit(analyst_report: dict, brand: dict) -> dict:
     # Best content type
     best_ct = max(content_types, key=content_types.get) if content_types else "Reel"
 
-    # Goal: 10% follower growth this month
+    # Goal: use manually set goal, or default to 10% growth
     current_followers = followers
-    goal_followers    = max(followers + 100, int(followers * 1.1))
-    gap               = goal_followers - current_followers
+    if manual_follower_goal and manual_follower_goal > current_followers:
+        goal_followers = manual_follower_goal
+    else:
+        goal_followers = max(followers + 100, int(followers * 1.1))
+    gap = goal_followers - current_followers
 
     return {
         "ig_connected":     ig_connected,
