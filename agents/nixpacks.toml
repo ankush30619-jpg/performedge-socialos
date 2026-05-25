@@ -4,7 +4,9 @@ nixPkgs = ["python313"]
 [phases.install]
 cmds = [
   "python3.13 -m venv /opt/venv",
-  "/opt/venv/bin/python3.13 -c \"import urllib.request as u; base='https://raw.githubusercontent.com/ankush30619-jpg/performedge-socialos/master/agents/'; files=['requirements.txt','main.py','state.py','pipeline.py','nodes/growth_planner.py','nodes/designer.py']; [(__import__('os').makedirs(__import__('os.path').dirname(f) or '.', exist_ok=True) or open(f,'wb').write(u.urlopen(base+f).read())) for f in files]; print('[nixpacks] Patched files from master')\"",
+  "mkdir -p nodes",
+  "/opt/venv/bin/python3.13 -c \"import urllib.request as u; base='https://raw.githubusercontent.com/ankush30619-jpg/performedge-socialos/master/agents/'; [open(f,'wb').write(u.urlopen(base+f).read()) for f in ['requirements.txt','main.py','state.py','pipeline.py']]; print('[nixpacks] Patched root files')\"",
+  "/opt/venv/bin/python3.13 -c \"import urllib.request as u; base='https://raw.githubusercontent.com/ankush30619-jpg/performedge-socialos/master/agents/nodes/'; [open('nodes/'+f,'wb').write(u.urlopen(base+f).read()) for f in ['growth_planner.py','designer.py']]; print('[nixpacks] Patched nodes files')\"",
   "/opt/venv/bin/pip install -r requirements.txt"
 ]
 
