@@ -119,13 +119,13 @@ export default function AgentsPage() {
             }));
           } else if (e.type === "pipeline_complete") {
             // Update activeRun with final outputs from the pipeline_complete event
-            if (e.data) {
-              setActiveRun((prev: AgentRun | null) => prev ? {
-                ...prev,
-                pptUrl: e.data?.pptUrl ?? prev.pptUrl,
-                excelUrl: e.data?.excelUrl ?? prev.excelUrl,
-                postsGenerated: e.data?.postsGenerated ?? prev.postsGenerated,
-              } : prev);
+            if (e.data && activeRun) {
+              setActiveRun({
+                ...activeRun,
+                pptUrl: (e.data?.pptUrl as string | undefined) ?? activeRun.pptUrl,
+                excelUrl: (e.data?.excelUrl as string | undefined) ?? activeRun.excelUrl,
+                postsGenerated: (e.data?.postsGenerated as number | undefined) ?? activeRun.postsGenerated,
+              });
             }
             sseRef.current?.close();
             setPipelineDone(true);
