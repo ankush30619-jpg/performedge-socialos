@@ -140,30 +140,14 @@ export async function agentRoutes(app: FastifyInstance) {
       },
     });
 
-    // Try BullMQ first; fall back to direct async execution
-    let queued = false;
-    try {
-      const { agentQueue } = await import("../lib/queues");
-      await agentQueue.add(
-        "run-pipeline",
-        { runId: run.id, brandId: body.brandId, userId: user.id, mode: body.mode, daysAhead: body.daysAhead },
-        { jobId: run.id, attempts: 1 }
+    // Always execute directly in background (no BullMQ for pipeline runs)
+    // setImmediate ensures the 202 response is sent before heavy work starts
+    setImmediate(() => {
+      executePipelineRun(run.id, body.brandId, user.id, body.mode, body.daysAhead).catch(
+        (e) => console.error("[Pipeline] Background run error:", e)
       );
-      queued = true;
-      console.log(`[Pipeline] Run ${run.id} queued via BullMQ`);
-    } catch {
-      // Redis unavailable — run directly in background
-    }
-
-    if (!queued) {
-      // Kick off directly as a background async task (no await)
-      setImmediate(() => {
-        executePipelineRun(run.id, body.brandId, user.id, body.mode, body.daysAhead).catch(
-          (e) => console.error("[Pipeline] Background run error:", e)
-        );
-      });
-      console.log(`[Pipeline] Run ${run.id} started directly (no Redis)`);
-    }
+    });
+    console.log(`[Pipeline] Run ${run.id} started (direct execution)`);
 
     return reply.code(202).send({ run });
   });
@@ -240,24 +224,27 @@ export async function agentRoutes(app: FastifyInstance) {
   app.get("/api/agents/runs/:runId/stream", auth, async (req, reply) => {
     const { runId } = req.params as { runId: string };
 
-    // Set SSE headers
+    // Set SSE headers — use request origin for CORS compatibility with EventSource
+    const origin = req.headers.origin || "*";
     reply.raw.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
       "X-Accel-Buffering": "no",
-      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Origin": origin,
+      "Access-Control-Allow-Credentials": "true",
     });
 
     const keepAlive = setInterval(() => {
       reply.raw.write(": keepalive\n\n");
     }, 15000);
 
-    // Retry connecting to agents SSE — handles race condition where
-    // the pipeline hasn't registered the run yet when frontend connects.
-    // Retry for up to 60 seconds (60 attempts × 1 second).
+    // Retry connecting to agents SSE — handles race conditions where:
+    // 1. Pipeline hasn't registered the run yet (404)
+    // 2. Agents service is temporarily unavailable (network error)
+    // Retry for up to 90 seconds (90 attempts × 1 second).
     let agentStream = null;
-    for (let attempt = 0; attempt < 60; attempt++) {
+    for (let attempt = 0; attempt < 90; attempt++) {
       try {
         agentStream = await axios.get(`${AGENTS_URL}/runs/${runId}/stream`, {
           responseType: "stream",
@@ -266,15 +253,15 @@ export async function agentRoutes(app: FastifyInstance) {
         break; // connected successfully
       } catch (err: unknown) {
         const status = (err as { response?: { status?: number } })?.response?.status;
-        if (status === 404 && attempt < 59) {
-          // Run not started yet — wait 1 second and retry
+        // Retry on 404 (run not started yet) OR on network errors (!status = ECONNREFUSED/timeout)
+        if (attempt < 89) {
           await new Promise((r) => setTimeout(r, 1000));
           continue;
         }
-        // Fatal error or exhausted retries
+        // Exhausted all retries
         clearInterval(keepAlive);
         reply.raw.write(
-          `data: ${JSON.stringify({ type: "pipeline_failed", message: "Pipeline could not start — check server logs" })}\n\n`
+          `data: ${JSON.stringify({ type: "pipeline_failed", message: `Pipeline could not start after ${attempt + 1}s — HTTP ${status ?? "network error"}` })}\n\n`
         );
         reply.raw.end();
         return;
@@ -284,7 +271,7 @@ export async function agentRoutes(app: FastifyInstance) {
     if (!agentStream) {
       clearInterval(keepAlive);
       reply.raw.write(
-        `data: ${JSON.stringify({ type: "pipeline_failed", message: "Run not started within 60 seconds" })}\n\n`
+        `data: ${JSON.stringify({ type: "pipeline_failed", message: "Run not started within 90 seconds" })}\n\n`
       );
       reply.raw.end();
       return;

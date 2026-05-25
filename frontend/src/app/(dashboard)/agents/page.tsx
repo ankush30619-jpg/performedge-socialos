@@ -48,6 +48,7 @@ export default function AgentsPage() {
   const [agentStatuses, setAgentStatuses] = useState<AgentStatuses>({});
   const [showLogs, setShowLogs]           = useState(false);
   const [pipelineDone, setPipelineDone]   = useState(false);
+  const [isPipelineActive, setIsPipelineActive] = useState(false); // true while pipeline running
   const [elapsedSec, setElapsedSec]       = useState(0);
   const [runOptions, setRunOptions]       = useState({ mode: "full", daysAhead: 15 });
   const sseRef        = useRef<EventSource | null>(null);
@@ -69,6 +70,40 @@ export default function AgentsPage() {
     if (timerRef.current) clearInterval(timerRef.current);
   }, []);
 
+  // Polling fallback: when pipeline is active but SSE might have failed,
+  // poll run status every 5 seconds to detect completion
+  useEffect(() => {
+    if (!isPipelineActive || pipelineDone || !activeRun) return;
+    const poll = setInterval(async () => {
+      try {
+        const res = await agentAPI.status(activeRun.id);
+        const run = res.data.run as AgentRun;
+        if (run.status === "completed" || run.status === "failed" || run.status === "stopped") {
+          setIsPipelineActive(false);
+          setPipelineDone(true);
+          if (run.status === "completed") {
+            setActiveRun({
+              ...activeRunRef.current!,
+              pptUrl: run.pptUrl ?? activeRunRef.current?.pptUrl,
+              excelUrl: run.excelUrl ?? activeRunRef.current?.excelUrl,
+              postsGenerated: run.postsGenerated ?? activeRunRef.current?.postsGenerated ?? 0,
+            });
+          }
+          if (timerRef.current) clearInterval(timerRef.current);
+          refetchRuns();
+        }
+        // Update agent statuses from DB if we have them
+        if (run.agentStatuses && Object.keys(run.agentStatuses).length > 0) {
+          setAgentStatuses(prev => ({ ...run.agentStatuses as AgentStatuses, ...prev }));
+        }
+      } catch {
+        // ignore poll errors
+      }
+    }, 5000);
+    return () => clearInterval(poll);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPipelineActive, pipelineDone, activeRun?.id]);
+
   // Run history
   const { data: runsData, refetch: refetchRuns } = useQuery({
     queryKey: ["runs", activeBrand?.id],
@@ -89,6 +124,7 @@ export default function AgentsPage() {
       clearSSEEvents();
       setAgentStatuses({});
       setPipelineDone(false);
+      setIsPipelineActive(true); // pipeline is now running
       setElapsedSec(0);
 
       // Start elapsed timer
@@ -133,11 +169,13 @@ export default function AgentsPage() {
             }
             sseRef.current?.close();
             setPipelineDone(true);
+            setIsPipelineActive(false);
             if (timerRef.current) clearInterval(timerRef.current);
             refetchRuns();
           } else if (e.type === "pipeline_failed") {
             sseRef.current?.close();
             setPipelineDone(true);
+            setIsPipelineActive(false);
             if (timerRef.current) clearInterval(timerRef.current);
             refetchRuns();
           }
@@ -152,6 +190,8 @@ export default function AgentsPage() {
     onSuccess: () => {
       sseRef.current?.close();
       setActiveRun(null);
+      setIsPipelineActive(false);
+      setPipelineDone(false);
       if (timerRef.current) clearInterval(timerRef.current);
       refetchRuns();
     },
@@ -165,16 +205,18 @@ export default function AgentsPage() {
   const estimatedDone   = completedAgents.reduce((acc, k) => acc + (AGENT_TIMES[k] ?? 10), 0);
   const estRemainingSec = Math.max(0, TOTAL_EST - estimatedDone - elapsedSec);
 
+  // isRunning is true from the moment pipeline starts until pipeline_complete/failed fires
+  // (using isPipelineActive state, not startMutation.isPending which goes false immediately after 202)
+  const isRunning = isPipelineActive;
+
   const pipelineStatus = (() => {
-    if (startMutation.isPending) return "running";
+    if (isRunning) return "running";
     const statuses = Object.values(agentStatuses).map(s => s.status);
-    if (statuses.includes("failed")) return "failed";
-    if (statuses.length > 0 && statuses.every(s => s === "completed")) return "completed";
-    if (statuses.includes("running")) return "running";
+    if (pipelineDone && statuses.some(s => s === "failed") && !statuses.some(s => s === "completed")) return "failed";
+    if (pipelineDone && completedCount > 0) return "completed";
+    if (pipelineDone) return "completed";
     return "idle";
   })();
-
-  const isRunning = pipelineStatus === "running";
 
   // Format seconds to mm:ss
   function fmtTime(s: number) {

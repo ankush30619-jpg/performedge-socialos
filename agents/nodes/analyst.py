@@ -10,10 +10,22 @@ import aiohttp
 from openai import AsyncOpenAI
 from state import SocialOSState
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-_oai = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
-
 GRAPH_BASE = "https://graph.facebook.com/v21.0"
+
+# Lazy singleton for OpenAI client (avoids module-level init before dotenv loads)
+_oai = None
+
+def _get_oai():
+    global _oai
+    if _oai is not None:
+        return _oai
+    key = os.getenv("OPENAI_API_KEY", "")
+    if key:
+        _oai = AsyncOpenAI(api_key=key)
+        print(f"[Analyst] OpenAI client initialized")
+    else:
+        print(f"[Analyst] OPENAI_API_KEY missing — AI features disabled")
+    return _oai
 
 
 async def analyst_node(state: SocialOSState, event_queue: asyncio.Queue) -> dict:
@@ -178,7 +190,7 @@ async def _build_report_from_ig(ig_data: dict, name: str, niche: str, audience: 
     if followers > 0 and posts:
         avg_engagement_rate = round(((total_likes + total_comments) / len(posts) / followers) * 100, 2)
 
-    # Use GPT to generate strategic insights from the real data
+    # Use GPT to generate strategic insights from the real data (lazy init)
     strategic_insights = await _gpt_insights_from_data(
         name, niche, followers, avg_engagement_rate, avg_reach, len(posts), top_posts[:5], brand_knowledge
     )
@@ -209,7 +221,8 @@ async def _build_report_from_ig(ig_data: dict, name: str, niche: str, audience: 
 
 async def _gpt_insights_from_data(name, niche, followers, eng_rate, avg_reach, post_count, top_posts, brand_knowledge) -> dict:
     """Use GPT to interpret the real IG data into strategic insights."""
-    if not _oai:
+    oai = _get_oai()
+    if not oai:
         return {}
     knowledge_desc = ""
     if isinstance(brand_knowledge, dict):
@@ -221,7 +234,7 @@ async def _gpt_insights_from_data(name, niche, followers, eng_rate, avg_reach, p
     ])
 
     try:
-        resp = await _oai.chat.completions.create(
+        resp = await oai.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {
@@ -259,7 +272,8 @@ async def _gpt_insights_from_data(name, niche, followers, eng_rate, avg_reach, p
 
 async def _generate_baseline_report(name, niche, audience, tone, brand_knowledge) -> dict:
     """GPT-only baseline when no Instagram connected."""
-    if not _oai:
+    oai = _get_oai()
+    if not oai:
         return _fallback_report(name, niche)
 
     knowledge_desc = ""
@@ -267,7 +281,7 @@ async def _generate_baseline_report(name, niche, audience, tone, brand_knowledge
         knowledge_desc = brand_knowledge.get("description", "") or ""
 
     try:
-        resp = await _oai.chat.completions.create(
+        resp = await oai.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {

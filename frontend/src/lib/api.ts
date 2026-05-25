@@ -73,9 +73,10 @@ export function createSSEConnection(
   onEvent: (event: unknown) => void,
   onError?: (err: Event) => void
 ): EventSource {
-  const es = new EventSource(`${API_BASE}/api/agents/runs/${runId}/stream`, {
-    withCredentials: true,
-  });
+  // Note: EventSource can't send Authorization headers.
+  // The backend has BYPASS_AUTH=true in production so no credentials needed.
+  // withCredentials: false allows Access-Control-Allow-Origin: * to work correctly.
+  const es = new EventSource(`${API_BASE}/api/agents/runs/${runId}/stream`);
   es.onmessage = (e) => {
     try {
       onEvent(JSON.parse(e.data));

@@ -6,7 +6,7 @@ cmds = [
   "python3.13 -m venv /opt/venv",
   "mkdir -p nodes",
   "/opt/venv/bin/python3.13 -c \"import urllib.request as u; base='https://raw.githubusercontent.com/ankush30619-jpg/performedge-socialos/master/agents/'; [open(f,'wb').write(u.urlopen(base+f).read()) for f in ['requirements.txt','main.py','state.py','pipeline.py']]; print('[nixpacks] Patched root files')\"",
-  "/opt/venv/bin/python3.13 -c \"import urllib.request as u; base='https://raw.githubusercontent.com/ankush30619-jpg/performedge-socialos/master/agents/nodes/'; [open('nodes/'+f,'wb').write(u.urlopen(base+f).read()) for f in ['growth_planner.py','designer.py']]; print('[nixpacks] Patched nodes files')\"",
+  "/opt/venv/bin/python3.13 -c \"import urllib.request as u; base='https://raw.githubusercontent.com/ankush30619-jpg/performedge-socialos/master/agents/nodes/'; [open('nodes/'+f,'wb').write(u.urlopen(base+f).read()) for f in ['growth_planner.py','designer.py','analyst.py','brand_manager.py','strategist.py','copywriter.py','competitor_tracker.py','research_agent.py']]; print('[nixpacks] Patched nodes files')\"",
   "/opt/venv/bin/pip install -r requirements.txt"
 ]
 
