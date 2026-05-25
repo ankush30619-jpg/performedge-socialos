@@ -117,7 +117,21 @@ export default function AgentsPage() {
               ...prev,
               [e.agentKey!]: { status: "failed", message: e.message },
             }));
-          } else if (e.type === "pipeline_complete" || e.type === "pipeline_failed") {
+          } else if (e.type === "pipeline_complete") {
+            // Update activeRun with final outputs from the pipeline_complete event
+            if (e.data) {
+              setActiveRun((prev: AgentRun | null) => prev ? {
+                ...prev,
+                pptUrl: e.data?.pptUrl ?? prev.pptUrl,
+                excelUrl: e.data?.excelUrl ?? prev.excelUrl,
+                postsGenerated: e.data?.postsGenerated ?? prev.postsGenerated,
+              } : prev);
+            }
+            sseRef.current?.close();
+            setPipelineDone(true);
+            if (timerRef.current) clearInterval(timerRef.current);
+            refetchRuns();
+          } else if (e.type === "pipeline_failed") {
             sseRef.current?.close();
             setPipelineDone(true);
             if (timerRef.current) clearInterval(timerRef.current);
