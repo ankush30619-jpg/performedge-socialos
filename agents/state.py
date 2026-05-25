@@ -1,8 +1,31 @@
 """
 SocialOS LangGraph State Definition
 Shared state object passed between all agent nodes in the pipeline.
+
+All fields use Annotated with a "last value wins" reducer so LangGraph
+doesn't throw INVALID_CONCURRENT_GRAPH_UPDATE when nodes return the
+full merged state dict.
 """
-from typing import TypedDict, Optional, Any
+from typing import TypedDict, Optional, Any, Annotated
+
+
+def _last(a: Any, b: Any) -> Any:
+    """Reducer: always keep the latest value (last writer wins)."""
+    return b
+
+
+def _merge_dict(a: dict, b: dict) -> dict:
+    """Reducer: merge two dicts, b values win on conflict."""
+    if a is None:
+        return b or {}
+    if b is None:
+        return a or {}
+    return {**a, **b}
+
+
+def _append_list(a: list, b: list) -> list:
+    """Reducer: concatenate lists (for errors list)."""
+    return (a or []) + (b or [])
 
 
 class AgentStatus(TypedDict):
@@ -12,44 +35,44 @@ class AgentStatus(TypedDict):
 
 class SocialOSState(TypedDict):
     # ── Run metadata ──────────────────────────────────────────────────────────
-    run_id: str
-    brand_id: str
-    user_id: str
-    mode: str            # full | analyst_only | strategy_only | design_only
-    days_ahead: int
+    run_id:     Annotated[str, _last]
+    brand_id:   Annotated[str, _last]
+    user_id:    Annotated[str, _last]
+    mode:       Annotated[str, _last]
+    days_ahead: Annotated[int, _last]
 
     # ── Brand data (populated by Brand Manager) ───────────────────────────────
-    brand: Optional[dict]          # Full brand object from DB
-    brand_knowledge: Optional[dict] # Learned brand knowledge JSON
+    brand:           Annotated[Optional[dict], _last]
+    brand_knowledge: Annotated[Optional[dict], _last]
 
     # ── Analyst output ────────────────────────────────────────────────────────
-    analyst_report: Optional[dict]  # Full analyst report with metrics, top posts
+    analyst_report: Annotated[Optional[dict], _last]
 
     # ── Research sub-agent output ─────────────────────────────────────────────
-    research_data: Optional[dict]   # Trends, news, hashtags
+    research_data: Annotated[Optional[dict], _last]
 
     # ── Competitor sub-agent output ───────────────────────────────────────────
-    competitor_data: Optional[dict] # Competitor analysis
+    competitor_data: Annotated[Optional[dict], _last]
 
     # ── Growth Planner output ─────────────────────────────────────────────────
-    growth_strategy: Optional[dict] # Strategy JSON
+    growth_strategy: Annotated[Optional[dict], _last]
 
     # ── Strategist output ─────────────────────────────────────────────────────
-    content_calendar: Optional[list]  # List of post dicts with date/type/topic
+    content_calendar: Annotated[Optional[list], _last]
 
     # ── Copywriter output ─────────────────────────────────────────────────────
-    posts_with_copy: Optional[list]   # Posts enriched with caption + hashtags
+    posts_with_copy: Annotated[Optional[list], _last]
 
     # ── Designer output ───────────────────────────────────────────────────────
-    design_assets: Optional[list]     # List of {imageUrl, contentType, topic, prompt, date}
+    design_assets: Annotated[Optional[list], _last]
 
     # ── Final output files ────────────────────────────────────────────────────
-    ppt_url: Optional[str]
-    excel_url: Optional[str]
-    posts_generated: int
+    ppt_url:         Annotated[Optional[str], _last]
+    excel_url:       Annotated[Optional[str], _last]
+    posts_generated: Annotated[int, _last]
 
-    # ── Per-agent status (for SSE streaming to frontend) ─────────────────────
-    agent_statuses: dict  # { agentKey: AgentStatus }
+    # ── Per-agent status (merged dict, last value per key wins) ──────────────
+    agent_statuses: Annotated[dict, _merge_dict]
 
-    # ── Error tracking ────────────────────────────────────────────────────────
-    errors: list  # List of {agent, error} dicts
+    # ── Error tracking (append-only list) ────────────────────────────────────
+    errors: Annotated[list, _append_list]
