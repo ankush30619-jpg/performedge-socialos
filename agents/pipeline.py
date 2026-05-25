@@ -85,35 +85,39 @@ def build_pipeline(event_queue: asyncio.Queue):
     graph.add_node("copywriter", wrap_node(copywriter_node, "copywriter"))
     graph.add_node("designer", wrap_node(designer_node, "designer"))
 
+    # Brand Manager ALWAYS runs first (loads brand data)
     graph.set_entry_point("brand_manager")
 
-    # Sequential edges
-    graph.add_edge("brand_manager", "analyst")
-    graph.add_edge("analyst", "growth_planner")  # growth_planner runs research + competitor internally
-    graph.add_edge("growth_planner", "strategist")
-    graph.add_edge("strategist", "copywriter")
-    graph.add_edge("copywriter", "designer")
-    graph.add_edge("designer", END)
-
-    # Mode-based conditional routing
+    # After Brand Manager — route based on mode (single conditional, no duplicate __start__ edge)
     def route_after_brand_manager(state: SocialOSState):
         mode = state.get("mode", "full")
         if mode == "analyst_only":
-            return "analyst"
+            return "analyst_end"   # analyst → END
         if mode == "strategy_only":
             return "strategist"
         if mode == "design_only":
             return "designer"
-        return "analyst"
+        return "full"              # full pipeline
 
-    # Override entry edge with conditional
-    graph.set_conditional_entry_point(
+    graph.add_node("analyst_end", wrap_node(analyst_node, "analyst"))
+
+    graph.add_conditional_edges(
+        "brand_manager",
         route_after_brand_manager,
         {
-            "analyst": "analyst",
-            "strategist": "strategist",
-            "designer": "designer",
+            "analyst_end": "analyst_end",  # analyst only → stop after analyst
+            "strategist":  "strategist",
+            "designer":    "designer",
+            "full":        "analyst",      # full: analyst → growth_planner → …
         },
     )
+
+    # Full pipeline edges
+    graph.add_edge("analyst_end", END)
+    graph.add_edge("analyst", "growth_planner")
+    graph.add_edge("growth_planner", "strategist")
+    graph.add_edge("strategist", "copywriter")
+    graph.add_edge("copywriter", "designer")
+    graph.add_edge("designer", END)
 
     return graph.compile()
