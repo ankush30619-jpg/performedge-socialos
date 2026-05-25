@@ -26,7 +26,7 @@ def build_pipeline(event_queue: asyncio.Queue):
 
     # Wrap each node to emit SSE events
     def wrap_node(node_fn, agent_key: str):
-        async def wrapped(state: SocialOSState) -> SocialOSState:
+        async def wrapped(state: SocialOSState) -> dict:
             # Emit started event
             await event_queue.put({
                 "type": "agent_started",
@@ -35,32 +35,27 @@ def build_pipeline(event_queue: asyncio.Queue):
                 "timestamp": datetime.utcnow().isoformat(),
             })
 
-            # Update state
-            state["agent_statuses"][agent_key] = {"status": "running", "message": "Running…"}
-
             try:
                 result = await node_fn(state, event_queue)
 
-                state["agent_statuses"][agent_key] = {
-                    "status": "completed",
-                    "message": result.get("_message", "Completed"),
-                }
+                msg = result.pop("_message", "Completed")
 
                 await event_queue.put({
                     "type": "agent_completed",
                     "agentKey": agent_key,
-                    "message": result.get("_message", "Completed"),
+                    "message": msg,
                     "timestamp": datetime.utcnow().isoformat(),
                 })
 
-                # Remove internal message key before merging
-                result.pop("_message", None)
-                return {**state, **result}
+                # LangGraph ONLY wants the delta (changed keys), not the full state.
+                # agent_statuses uses _merge_dict reducer so we return just this agent's entry.
+                return {
+                    **result,
+                    "agent_statuses": {agent_key: {"status": "completed", "message": msg}},
+                }
 
             except Exception as e:
                 msg = str(e)
-                state["agent_statuses"][agent_key] = {"status": "failed", "message": msg}
-                state["errors"].append({"agent": agent_key, "error": msg})
 
                 await event_queue.put({
                     "type": "agent_failed",
@@ -69,8 +64,11 @@ def build_pipeline(event_queue: asyncio.Queue):
                     "timestamp": datetime.utcnow().isoformat(),
                 })
 
-                # Non-fatal — continue pipeline
-                return state
+                # Non-fatal — return only the status delta + error
+                return {
+                    "agent_statuses": {agent_key: {"status": "failed", "message": msg}},
+                    "errors": [{"agent": agent_key, "error": msg}],
+                }
 
         return wrapped
 
