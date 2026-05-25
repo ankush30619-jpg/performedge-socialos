@@ -61,8 +61,13 @@ async def health():
 async def start_run(req: RunRequest):
     run_id = req.runId
 
+    # If run already exists but completed/failed, clear it so it can be re-run
     if run_id in _active_runs:
-        return {"message": "Run already in progress", "runId": run_id}
+        existing = _active_runs[run_id]
+        if existing.get("status") in ("completed", "failed", "stopped"):
+            del _active_runs[run_id]
+        else:
+            return {"message": "Run already in progress", "runId": run_id}
 
     # Create SSE event queue
     event_queue: asyncio.Queue = asyncio.Queue()

@@ -127,30 +127,56 @@ export async function agentRoutes(app: FastifyInstance) {
       reply.raw.write(": keepalive\n\n");
     }, 15000);
 
-    // Proxy SSE from Python agents service
-    try {
-      const response = await axios.get(`${AGENTS_URL}/runs/${runId}/stream`, {
-        responseType: "stream",
-      });
-
-      response.data.on("data", (chunk: Buffer) => {
-        reply.raw.write(chunk);
-      });
-
-      response.data.on("end", () => {
+    // Retry connecting to agents SSE — handles race condition where
+    // BullMQ worker hasn't started the run yet when frontend connects.
+    // Retry for up to 30 seconds (30 attempts × 1 second).
+    let agentStream = null;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      try {
+        agentStream = await axios.get(`${AGENTS_URL}/runs/${runId}/stream`, {
+          responseType: "stream",
+          timeout: 600_000,
+        });
+        break; // connected successfully
+      } catch (err: unknown) {
+        const status = (err as { response?: { status?: number } })?.response?.status;
+        if (status === 404 && attempt < 29) {
+          // Run not started yet — wait 1 second and retry
+          await new Promise((r) => setTimeout(r, 1000));
+          continue;
+        }
+        // Fatal error or exhausted retries
         clearInterval(keepAlive);
+        reply.raw.write(
+          `data: ${JSON.stringify({ type: "error", message: "Agents service unavailable" })}\n\n`
+        );
         reply.raw.end();
-      });
-
-      response.data.on("error", () => {
-        clearInterval(keepAlive);
-        reply.raw.end();
-      });
-    } catch {
-      clearInterval(keepAlive);
-      reply.raw.write(`data: ${JSON.stringify({ type: "error", message: "Agents service unavailable" })}\n\n`);
-      reply.raw.end();
+        return;
+      }
     }
+
+    if (!agentStream) {
+      clearInterval(keepAlive);
+      reply.raw.write(
+        `data: ${JSON.stringify({ type: "error", message: "Run not started within 30 seconds" })}\n\n`
+      );
+      reply.raw.end();
+      return;
+    }
+
+    agentStream.data.on("data", (chunk: Buffer) => {
+      reply.raw.write(chunk);
+    });
+
+    agentStream.data.on("end", () => {
+      clearInterval(keepAlive);
+      reply.raw.end();
+    });
+
+    agentStream.data.on("error", () => {
+      clearInterval(keepAlive);
+      reply.raw.end();
+    });
 
     req.raw.on("close", () => {
       clearInterval(keepAlive);
