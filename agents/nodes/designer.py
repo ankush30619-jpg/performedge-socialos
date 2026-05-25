@@ -26,8 +26,6 @@ from state import SocialOSState
 FREEPIK_API_KEY  = os.getenv("FREEPIK_API_KEY", "")
 FREEPIK_ENGINE   = os.getenv("FREEPIK_ENGINE", "mystic")
 OPENAI_API_KEY   = os.getenv("OPENAI_API_KEY", "")
-SUPABASE_URL     = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
-SUPABASE_KEY     = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 BUCKET           = os.getenv("SUPABASE_STORAGE_BUCKET", "socialos-storage")
 
 # Only generate images for these types
@@ -35,12 +33,27 @@ VISUAL_TYPES = {"Graphic", "AI Reel", "Carousel"}
 # Max images per run (cost control)
 MAX_IMAGES = 6
 
+# Lazy Supabase singleton — initialized on first use to ensure .env is loaded
 _supabase: SupabaseClient | None = None
-if SUPABASE_URL and SUPABASE_KEY:
+
+
+def _get_supabase() -> SupabaseClient | None:
+    """Return (or lazily create) the Supabase client."""
+    global _supabase
+    if _supabase is not None:
+        return _supabase
+    url = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    if not url or not key:
+        print(f"[Designer] Supabase env vars missing: URL={'set' if url else 'MISSING'}, KEY={'set' if key else 'MISSING'}")
+        return None
     try:
-        _supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    except Exception:
-        _supabase = None
+        _supabase = create_client(url, key)
+        print(f"[Designer] Supabase client initialized OK")
+        return _supabase
+    except Exception as e:
+        print(f"[Designer] Supabase init error: {e}")
+        return None
 
 
 # ── Main Node ─────────────────────────────────────────────────────────────────
@@ -465,15 +478,20 @@ async def _build_ppt(posts: list, brand: dict, strategy: dict, analyst_report: d
 # ── Supabase Upload ───────────────────────────────────────────────────────────
 
 def _upload_bytes(data: bytes, path: str, content_type: str) -> str | None:
-    if not _supabase:
+    sb = _get_supabase()
+    if not sb:
+        print(f"[Designer] Supabase unavailable — skipping upload for {path}")
         return None
+    bucket = os.getenv("SUPABASE_STORAGE_BUCKET", "socialos-storage")
     try:
-        _supabase.storage.from_(BUCKET).upload(
+        sb.storage.from_(bucket).upload(
             path, data,
             file_options={"content-type": content_type, "upsert": "true"},
         )
-        result = _supabase.storage.from_(BUCKET).get_public_url(path)
+        result = sb.storage.from_(bucket).get_public_url(path)
+        print(f"[Designer] Uploaded {path} -> {str(result)[:80]}")
         return result
     except Exception as e:
-        print(f"[Designer] Supabase upload error: {e}")
+        print(f"[Designer] Supabase upload error for {path}: {e}")
+        import traceback; traceback.print_exc()
         return None

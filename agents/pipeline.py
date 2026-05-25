@@ -88,33 +88,52 @@ def build_pipeline(event_queue: asyncio.Queue):
     # Brand Manager ALWAYS runs first (loads brand data)
     graph.set_entry_point("brand_manager")
 
-    # After Brand Manager — route based on mode (single conditional, no duplicate __start__ edge)
+    # After Brand Manager — route based on mode
     def route_after_brand_manager(state: SocialOSState):
         mode = state.get("mode", "full")
         if mode == "analyst_only":
-            return "analyst_end"   # analyst → END
+            return "analyst_end"
         if mode == "strategy_only":
             return "strategist"
         if mode == "design_only":
             return "designer"
-        return "full"              # full pipeline
+        if mode == "growth_planner_only":
+            return "analyst"          # analyst → growth_planner_end (PPT only)
+        return "full"                 # full pipeline
 
     graph.add_node("analyst_end", wrap_node(analyst_node, "analyst"))
+    graph.add_node("growth_planner_end", wrap_node(growth_planner_node, "growthPlanner"))
 
     graph.add_conditional_edges(
         "brand_manager",
         route_after_brand_manager,
         {
-            "analyst_end": "analyst_end",  # analyst only → stop after analyst
-            "strategist":  "strategist",
-            "designer":    "designer",
-            "full":        "analyst",      # full: analyst → growth_planner → …
+            "analyst_end":        "analyst_end",
+            "strategist":         "strategist",
+            "designer":           "designer",
+            "analyst":            "analyst",   # full + growth_planner_only
+            "full":               "analyst",
+        },
+    )
+
+    def route_after_analyst(state: SocialOSState):
+        mode = state.get("mode", "full")
+        if mode == "growth_planner_only":
+            return "growth_planner_end"
+        return "growth_planner"
+
+    graph.add_conditional_edges(
+        "analyst",
+        route_after_analyst,
+        {
+            "growth_planner_end": "growth_planner_end",
+            "growth_planner":     "growth_planner",
         },
     )
 
     # Full pipeline edges
     graph.add_edge("analyst_end", END)
-    graph.add_edge("analyst", "growth_planner")
+    graph.add_edge("growth_planner_end", END)   # growth_planner_only stops here
     graph.add_edge("growth_planner", "strategist")
     graph.add_edge("strategist", "copywriter")
     graph.add_edge("copywriter", "designer")

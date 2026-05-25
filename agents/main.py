@@ -8,18 +8,22 @@ import json
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 from typing import AsyncGenerator
 
-import httpx
+# ── Load .env FIRST — before any other module that reads os.getenv at import time ──
 from dotenv import load_dotenv
+_env_path = Path(__file__).parent / ".env"
+load_dotenv(dotenv_path=_env_path, override=True)
+print(f"[SocialOS] .env loaded from {_env_path} | SUPABASE_URL={'set' if os.getenv('NEXT_PUBLIC_SUPABASE_URL') else 'MISSING'}")
+
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from state import SocialOSState
 from pipeline import build_pipeline
-
-load_dotenv()
 
 # ── In-memory run state store (replace with Redis in production) ──────────────
 # run_id -> { state, event_queue, task }
