@@ -1,0 +1,176 @@
+═══════════════════════════════════════════════════════════════════
+  EXPERT SOCIAL MEDIA PLANNER — Quick Start  (v4)
+═══════════════════════════════════════════════════════════════════
+
+A 7-agent operating system for social media growth:
+
+  🏠 Home          — brand dashboard + quick actions
+  ⭐ GROOK         — Growth Planner (master strategist, leads execution)
+  🔮 Analyst Baba  — continuous Meta intelligence (audits + recommends)
+  🔍 Competitors   — competitor playbook (Apify + Gemini Vision)
+  🧠 Strategist    — plan-aware 30-day calendar builder
+  ✦ Copy Writer   — story-driven copy per row of the calendar
+  🎨 Designer      — premium visuals via Freepik + brand-asset compositing
+
+How they connect:
+  • GROOK reads Analyst Baba's reports + competitor playbook to build/revise plans
+  • Strategist reads GROOK's active plan + competitor playbook + trends
+  • Copy Writer reads brand profile + plan + competitors + keyword research
+  • Designer reads the copy Excel + brand assets (logos + product PNGs)
+
+═══════════════════════════════════════════════════════════════════
+
+FIRST-TIME SETUP (one-time, ~3 minutes)
+───────────────────────────────────────
+1. Double-click SETUP.bat
+   → This installs Python (if needed) and dependencies.
+   → If a Windows security prompt appears, click "Yes".
+
+2. Double-click RUN.bat to launch the app.
+
+3. Click the "⚙ Settings" button (bottom-left).
+   → Paste your Gemini API key.
+   → Click Save.
+
+   Don't have a key? Get one free at:
+   https://aistudio.google.com/apikey
+   (Free tier: 1,500 generations/day. No credit card needed.)
+
+
+GENERATING COPY (every time)
+───────────────────────────────────────
+1. Pick a CLIENT BRAND from the dropdown.
+
+2. Click "Browse…" and select your INPUT CALENDAR (.xlsx).
+   The Excel file needs these columns at minimum:
+     • Date          (e.g., 10 May)
+     • Day           (e.g., Saturday) — optional
+     • Platform      (e.g., Instagram, Facebook)
+     • Content Type  (Reel / Carousel / Static / Story)
+     • Main Topic    (the post idea)
+     • Key Topic     (specific angle) — optional
+     • Audience      (target audience) — optional
+     • Festival      (occasion if any) — optional
+     • Notes         (extra context) — optional
+
+   Templates are provided in the /templates folder for each brand.
+   You can use any column order — the app auto-detects them.
+
+3. (Optional) Change the OUTPUT FOLDER.
+
+4. Click "✨ Generate Copy".
+
+5. When done, the output Excel will be saved to your output folder.
+   Each post will have:
+     • 3 Hook Variants
+     • Full Script (Reels) or Slide-by-Slide Copy (Carousels)
+     • Story-driven Caption
+     • SEO Keywords
+     • Hashtags
+     • CTA
+     • Visual Note for the designer
+
+
+BRANDS PROVIDED
+───────────────────────────────────────
+• Mishikas Electronics — Hinglish, bold, family-first
+• Journey Group        — Direct, expert, supportive
+
+
+ADDING A NEW BRAND (NEW in v2)
+───────────────────────────────────────
+Click "+ New Brand" next to the dropdown. A dialog opens.
+
+1. Click "+ Add Files…" and select your brand materials:
+   • PDF brand decks, brand boards
+   • PNG/JPG logos, mood boards, swatches
+   • PowerPoint (.pptx) presentations
+   • Word (.docx) brand documents
+   • TXT/MD notes
+   (You can add any combination — drop everything you have.)
+
+2. Click "🔍 Extract Brand Profile".
+   Gemini reads all your files and auto-extracts:
+     • Brand name, tagline, category, location
+     • Color palette (hex codes)
+     • Fonts
+     • Tone & voice rules
+     • Target audience + pain points + desires
+     • Signature phrases
+     • Things the brand should NEVER do
+     • Story formula
+     • CTA styles
+   ~30 seconds depending on file size.
+
+3. Review the auto-filled form. Edit anything that's off.
+
+4. Click "💾 Save Brand".
+   The brand now appears in your dropdown — ready to generate copy for.
+
+
+COSTS
+───────────────────────────────────────
+• Gemini API free tier: 1,500 requests/day.
+• At ~30 posts/month per client, you'll use < 2% of free quota.
+• NO credit card required. NO automatic billing.
+
+
+TROUBLESHOOTING
+───────────────────────────────────────
+• "Python is not installed" → Run SETUP.bat first.
+• "No API key set" → Settings → paste Gemini key → Save.
+• "Could not find Main Topic column" → Check your Excel has
+  a 'Main Topic' or 'Topic' or 'Post Topic' column header.
+• App won't launch → Open the folder, right-click RUN.bat,
+  "Run as administrator".
+
+
+COMPETITOR INTELLIGENCE (NEW in v2)
+───────────────────────────────────────
+1. In Settings, paste your Apify API token
+   (free at https://console.apify.com/account/integrations)
+
+2. Pick a brand → click "🔍 Competitors".
+
+3. Paste competitor Instagram @handles (or full URLs).
+   Add as many as you want — no limit.
+
+4. Click "🔄 Refresh All Insights".
+   The app:
+   • Scrapes up to 10 recent posts per competitor via Apify
+   • Sends captions + sample images to Gemini Vision
+   • Builds a strategic playbook for your brand's category
+
+5. Every future copy generation for that brand automatically uses
+   these insights — telling Gemini what to AVOID (saturated themes)
+   and what to LEAN INTO (underused angles, engagement drivers).
+
+Cost: ~$0 (Apify free $5/mo credit covers ~500 profile scrapes).
+
+
+AI REEL CONCEPT MODE (NEW in v2)
+───────────────────────────────────────
+In your input calendar, set Content Type to one of:
+   • "AI Reel"     • "AI Story Reel"     • "CGI Reel"
+   • "AI Video"    • "Story Reel"
+
+For those rows, the agent produces an EMOTIONAL STORYTELLING brief
+instead of a regular reel script:
+
+   🎬 Concept Title
+   💡 Emotional Core
+   ━━━ Scene 1 (0-5s) ━━━
+     • Visual description (plain English)
+     • Voiceover (Hinglish or English)
+     • On-screen text
+     • 🎞 AI VIDEO PROMPT (paste into:
+         Runway Gen-3 · Google Veo · Kling · Pika · Hailuo)
+   ━━━ Scene 2 ━━━ ... and so on
+   🎵 BGM suggestion
+   + Caption + Hashtags + CTA + Visual Note
+
+You drop each scene's AI prompt into a free AI video tool, stitch
+the clips, add the VO and BGM — you have a Cadbury/Tanishq-calibre
+emotional ad film made entirely with AI.
+
+═══════════════════════════════════════════════════════════════════
