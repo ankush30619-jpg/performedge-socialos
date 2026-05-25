@@ -50,10 +50,13 @@ export default function AgentsPage() {
   const [pipelineDone, setPipelineDone]   = useState(false);
   const [elapsedSec, setElapsedSec]       = useState(0);
   const [runOptions, setRunOptions]       = useState({ mode: "full", daysAhead: 15 });
-  const sseRef       = useRef<EventSource | null>(null);
-  const logsEndRef   = useRef<HTMLDivElement>(null);
-  const timerRef     = useRef<ReturnType<typeof setInterval> | null>(null);
-  const startTimeRef = useRef<number | null>(null);
+  const sseRef        = useRef<EventSource | null>(null);
+  const logsEndRef    = useRef<HTMLDivElement>(null);
+  const timerRef      = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startTimeRef  = useRef<number | null>(null);
+  // Keep a ref to activeRun so SSE callback always sees the latest value
+  const activeRunRef  = useRef<AgentRun | null>(activeRun);
+  useEffect(() => { activeRunRef.current = activeRun; }, [activeRun]);
 
   // Auto-scroll logs
   useEffect(() => {
@@ -118,13 +121,14 @@ export default function AgentsPage() {
               [e.agentKey!]: { status: "failed", message: e.message },
             }));
           } else if (e.type === "pipeline_complete") {
-            // Update activeRun with final outputs from the pipeline_complete event
-            if (e.data && activeRun) {
+            // Update activeRun with final outputs (use ref to avoid stale closure)
+            const current = activeRunRef.current;
+            if (e.data && current) {
               setActiveRun({
-                ...activeRun,
-                pptUrl: (e.data?.pptUrl as string | undefined) ?? activeRun.pptUrl,
-                excelUrl: (e.data?.excelUrl as string | undefined) ?? activeRun.excelUrl,
-                postsGenerated: (e.data?.postsGenerated as number | undefined) ?? activeRun.postsGenerated,
+                ...current,
+                pptUrl: (e.data?.pptUrl as string | undefined) ?? current.pptUrl,
+                excelUrl: (e.data?.excelUrl as string | undefined) ?? current.excelUrl,
+                postsGenerated: (e.data?.postsGenerated as number | undefined) ?? current.postsGenerated,
               });
             }
             sseRef.current?.close();
@@ -229,10 +233,19 @@ export default function AgentsPage() {
                   disabled={isRunning}
                 >
                   <option value="full">Full Pipeline (all agents)</option>
+                  <option value="growth_planner_only">Growth Planner (IG Audit + PPT)</option>
                   <option value="analyst_only">Analyst Only</option>
                   <option value="strategy_only">Strategy + Copy</option>
                   <option value="design_only">Design Only</option>
                 </select>
+                {runOptions.mode === "growth_planner_only" && (
+                  <div className="mt-2 p-3 rounded-xl bg-purple-500/10 border border-purple-500/20">
+                    <p className="text-[11px] text-purple-300 font-medium mb-1">Growth Planner Mode</p>
+                    <p className="text-[10px] text-white/40 leading-relaxed">
+                      Full Instagram audit — analyses every post, identifies what&apos;s working vs not working, builds content pillars, sets follower growth goals, and generates a comprehensive PPT report.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -310,7 +323,8 @@ export default function AgentsPage() {
                   {activeRun.pptUrl && (
                     <a href={activeRun.pptUrl} target="_blank" rel="noopener noreferrer"
                       className="flex items-center gap-2 text-xs text-orange-400 hover:text-orange-300 transition-colors">
-                      <Presentation className="w-3.5 h-3.5" /> Strategy Deck (.pptx)
+                      <Presentation className="w-3.5 h-3.5" />
+                      {runOptions.mode === "growth_planner_only" ? "Growth Planner PPT (.pptx)" : "Strategy Deck (.pptx)"}
                     </a>
                   )}
                   {activeRun.excelUrl && (
