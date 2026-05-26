@@ -90,14 +90,17 @@ async function main() {
 
   // ── Auth decorator ───────────────────────────────────────────────────────────
   // When BYPASS_AUTH=true (dev mode), skip JWT and inject the dev user.
-  if (process.env.BYPASS_AUTH === "true") {
+  // BYPASS_AUTH defaults to true for this internal tool (set BYPASS_AUTH=false to enable login)
+  const BYPASS = process.env.BYPASS_AUTH !== "false";
+
+  if (BYPASS) {
     await ensureBypassUser();
   }
 
   app.decorate(
     "authenticate",
     async function (req: FastifyRequest, reply: FastifyReply) {
-      if (process.env.BYPASS_AUTH === "true") {
+      if (BYPASS) {
         (req as FastifyRequest & { user: unknown }).user = {
           id:    _bypassUserId,
           email: _bypassEmail,
@@ -114,9 +117,9 @@ async function main() {
   );
 
   // ── Bypass token endpoint (no auth needed — frontend auto-login) ──────────────
-  // Only active when BYPASS_AUTH=true. Returns a 30-day JWT for the bypass user.
+  // Returns a 30-day JWT for the bypass user. Only active when BYPASS is enabled.
   app.get("/api/auth/bypass-token", async (req, reply) => {
-    if (process.env.BYPASS_AUTH !== "true" || !_bypassUserId) {
+    if (!BYPASS || !_bypassUserId) {
       return reply.code(403).send({ message: "Bypass auth not enabled" });
     }
     const token = app.jwt.sign(
