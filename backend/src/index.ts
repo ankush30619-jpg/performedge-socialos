@@ -120,9 +120,10 @@ async function main() {
     async function (req: FastifyRequest, reply: FastifyReply) {
       if (BYPASS) {
         (req as FastifyRequest & { user: unknown }).user = {
-          id:    _bypassUserId,
-          email: _bypassEmail,
-          role:  _bypassRole,
+          id:     _bypassUserId,
+          email:  _bypassEmail,
+          role:   _bypassRole,
+          bypass: true,   // signals routes to skip userId ownership checks
         };
         return;
       }
