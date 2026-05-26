@@ -535,14 +535,38 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         # ── Slide 6: Follower Growth Plan ──
         s = prs.slides.add_slide(blank); bg(s, dark)
         bar(s, 0, 0, Inches(10), Inches(0.08), green)
-        txt(s, "30-Day Follower Growth Plan", Inches(0.4), Inches(0.3), Inches(9), Inches(0.6), 26, bold=True)
-        txt(s, f"Target: {followers:,} → {goal:,} followers (+{gap:,})", Inches(0.4), Inches(0.9), Inches(9), Inches(0.5), 16, color=accent)
+
+        # Use KPI targets when no IG connected (avoids embarrassing "0 → 100" display)
+        _ar       = analyst_report or {}
+        _kpi      = _ar.get("kpi_targets_90day") or strategy.get("kpi_targets_90day") or {}
+        _kpi_fol  = int(_kpi.get("followers", 0)) if _kpi else 0
+
+        if not ig_connected and _kpi_fol > 0:
+            _goal_display    = _kpi_fol
+            _current_display = 0
+            _gap_display     = _kpi_fol
+            plan_title = "90-Day Follower Growth Roadmap"
+            plan_subtitle = f"Projected: 0 → {_kpi_fol:,} followers in 90 days based on brand strategy"
+        else:
+            _goal_display    = goal
+            _current_display = followers
+            _gap_display     = gap
+            plan_title = "30-Day Follower Growth Plan"
+            plan_subtitle = f"Target: {followers:,} → {goal:,} followers (+{gap:,})"
+
+        txt(s, plan_title, Inches(0.4), Inches(0.3), Inches(9), Inches(0.6), 26, bold=True)
+        txt(s, plan_subtitle, Inches(0.4), Inches(0.9), Inches(9), Inches(0.5), 16, color=accent)
 
         follower_plan = strategy.get("follower_plan") or {}
-        weeks = ["week1","week2","week3","week4"]
+        weeks  = ["week1","week2","week3","week4"]
         labels = ["Week 1","Week 2","Week 3","Week 4"]
         for i, (wk, label) in enumerate(zip(weeks, labels)):
-            val = follower_plan.get(wk, followers + gap // 4 * (i+1))
+            # For no-IG, distribute goal evenly across 4 weeks
+            fallback_val = int(_goal_display * (i + 1) / 4) if not ig_connected else (_current_display + _gap_display // 4 * (i+1))
+            val = follower_plan.get(wk, fallback_val)
+            if isinstance(val, str):
+                try: val = int(val.replace(",",""))
+                except: val = fallback_val
             bar(s, Inches(0.4 + i*2.4), Inches(1.6), Inches(2.0), Inches(1.6), RGBColor(0x1E,0x16,0x40))
             txt(s, f"{val:,}", Inches(0.4 + i*2.4), Inches(1.8), Inches(2), Inches(0.6), 18, bold=True, color=green, align=PP_ALIGN.CENTER)
             txt(s, label,     Inches(0.4 + i*2.4), Inches(2.4), Inches(2), Inches(0.4), 11, color=accent, align=PP_ALIGN.CENTER)
@@ -600,6 +624,125 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
             c = [green, accent, brand_color, RGBColor(0xF5,0x9E,0x0B), white][i % 5]
             bar(s, Inches(0.4), Inches(1.1 + i*0.8), Inches(9.2), Inches(0.65), RGBColor(0x1E,0x16,0x40))
             txt(s, f"{i+1:02d}  {action}", Inches(0.55), Inches(1.15 + i*0.8), Inches(9), Inches(0.55), 13, color=c)
+
+        # ── Slide 10: Hook Strategy ──
+        hook_strategy = strategy.get("hook_strategy") or []
+        if hook_strategy:
+            s = prs.slides.add_slide(blank); bg(s, dark)
+            bar(s, 0, 0, Inches(10), Inches(0.08), accent)
+            txt(s, "Hook Strategy", Inches(0.4), Inches(0.3), Inches(9), Inches(0.6), 26, bold=True, color=accent)
+            txt(s, "Engineered for scroll-stop in the first 1-2 seconds", Inches(0.4), Inches(0.9), Inches(9), Inches(0.4), 13, color=RGBColor(0x9C,0xA3,0xAF), italic=True)
+            for i, hook in enumerate(hook_strategy[:5]):
+                y = 1.5 + i * 0.68
+                bar(s, Inches(0.4), Inches(y), Inches(9.2), Inches(0.58), RGBColor(0x1A,0x0D,0x2E))
+                bar(s, Inches(0.4), Inches(y), Inches(0.06), Inches(0.58), accent)
+                txt(s, str(hook), Inches(0.6), Inches(y + 0.06), Inches(8.8), Inches(0.46), 12, color=white)
+
+        # ── Slide 11: Retention & Conversion Strategy ──
+        retention_strategy  = strategy.get("retention_strategy") or []
+        conversion_strategy = strategy.get("conversion_strategy") or []
+        if retention_strategy or conversion_strategy:
+            s = prs.slides.add_slide(blank); bg(s, dark)
+            bar(s, 0, 0, Inches(10), Inches(0.08), green)
+            txt(s, "Retention & Conversion Strategy", Inches(0.4), Inches(0.3), Inches(9), Inches(0.6), 26, bold=True)
+
+            txt(s, "RETENTION — Keep Viewers Watching", Inches(0.4), Inches(1.0), Inches(4.6), Inches(0.4), 13, bold=True, color=green)
+            for i, r in enumerate(retention_strategy[:4]):
+                bar(s, Inches(0.4), Inches(1.5 + i*0.75), Inches(4.5), Inches(0.62), RGBColor(0x0D,0x2E,0x1F))
+                txt(s, f"→ {r}", Inches(0.55), Inches(1.55 + i*0.75), Inches(4.2), Inches(0.52), 11, color=white)
+
+            txt(s, "CONVERSION — Turn Viewers Into Customers", Inches(5.1), Inches(1.0), Inches(4.6), Inches(0.4), 13, bold=True, color=accent)
+            for i, c in enumerate(conversion_strategy[:4]):
+                bar(s, Inches(5.1), Inches(1.5 + i*0.75), Inches(4.5), Inches(0.62), RGBColor(0x1A,0x0D,0x2E))
+                txt(s, f"→ {c}", Inches(5.25), Inches(1.55 + i*0.75), Inches(4.2), Inches(0.52), 11, color=white)
+
+        # ── Slide 12: Viral Opportunities ──
+        viral_opps   = strategy.get("viral_opportunities") or []
+        tiktok_fmts  = research_data.get("tiktok_formats") or []
+        yt_angles    = research_data.get("youtube_shorts_angles") or []
+        viral_fmts   = research_data.get("viral_formats") or []
+        if viral_opps or tiktok_fmts:
+            s = prs.slides.add_slide(blank); bg(s, dark)
+            bar(s, 0, 0, Inches(10), Inches(0.08), RGBColor(0xF5,0x9E,0x0B))
+            txt(s, "Viral Opportunities", Inches(0.4), Inches(0.3), Inches(9), Inches(0.6), 26, bold=True, color=RGBColor(0xF5,0x9E,0x0B))
+
+            # Left: viral content ideas
+            txt(s, "🔥 Viral Content Concepts", Inches(0.4), Inches(1.0), Inches(4.6), Inches(0.4), 13, bold=True, color=RGBColor(0xF5,0x9E,0x0B))
+            for i, v in enumerate(viral_opps[:3]):
+                bar(s, Inches(0.4), Inches(1.5 + i*0.9), Inches(4.5), Inches(0.78), RGBColor(0x2E,0x1D,0x00))
+                txt(s, str(v), Inches(0.55), Inches(1.55 + i*0.9), Inches(4.1), Inches(0.68), 11, color=white)
+
+            # Right: cross-platform formats
+            cross = (tiktok_fmts[:2] + yt_angles[:1]) or viral_fmts[:3]
+            txt(s, "📱 Cross-Platform Formats (TikTok/YT Shorts → Reels)", Inches(5.0), Inches(1.0), Inches(4.6), Inches(0.4), 11, bold=True, color=green)
+            for i, f in enumerate(cross[:3]):
+                label = f if isinstance(f, str) else (f.get("format","") + " — " + f.get("why",""))
+                bar(s, Inches(5.0), Inches(1.5 + i*0.9), Inches(4.6), Inches(0.78), RGBColor(0x0D,0x2E,0x1F))
+                txt(s, str(label)[:90], Inches(5.1), Inches(1.55 + i*0.9), Inches(4.3), Inches(0.68), 10, color=white)
+
+        # ── Slide 13: Competitor Advantage ──
+        comp_adv      = strategy.get("competitor_advantage") or []
+        comp_gaps     = competitor_data.get("content_gaps") or []
+        diff_strategy = competitor_data.get("differentiation_strategy") or ""
+        formats_own   = competitor_data.get("content_formats_to_own") or []
+        if comp_adv or comp_gaps:
+            s = prs.slides.add_slide(blank); bg(s, dark)
+            bar(s, 0, 0, Inches(10), Inches(0.08), red)
+            txt(s, "Competitor Advantage — How We Win", Inches(0.4), Inches(0.3), Inches(9), Inches(0.6), 26, bold=True, color=white)
+            if diff_strategy:
+                txt(s, str(diff_strategy)[:180], Inches(0.4), Inches(0.9), Inches(9.2), Inches(0.5), 11, color=RGBColor(0x9C,0xA3,0xAF), italic=True)
+
+            txt(s, "Our Differentiators", Inches(0.4), Inches(1.5), Inches(4.5), Inches(0.4), 13, bold=True, color=red)
+            items_left = comp_adv[:3] or ["Own a content format competitors ignore", "Be the most educational voice", "Build community, not just audience"]
+            for i, item in enumerate(items_left):
+                bar(s, Inches(0.4), Inches(2.0 + i*0.8), Inches(4.5), Inches(0.65), RGBColor(0x2E,0x0D,0x0D))
+                txt(s, f"⚡ {item}", Inches(0.55), Inches(2.05 + i*0.8), Inches(4.2), Inches(0.55), 11, color=white)
+
+            txt(s, "Gaps Competitors Are Missing", Inches(5.1), Inches(1.5), Inches(4.5), Inches(0.4), 13, bold=True, color=green)
+            for i, gap_item in enumerate(comp_gaps[:3]):
+                bar(s, Inches(5.1), Inches(2.0 + i*0.8), Inches(4.5), Inches(0.65), RGBColor(0x0D,0x2E,0x1F))
+                txt(s, f"• {str(gap_item)[:75]}", Inches(5.25), Inches(2.05 + i*0.8), Inches(4.2), Inches(0.55), 11, color=green)
+
+            if formats_own:
+                txt(s, "Formats to Own:", Inches(0.4), Inches(4.7), Inches(9), Inches(0.35), 12, bold=True, color=accent)
+                txt(s, "  •  ".join(str(f) for f in formats_own[:3]), Inches(0.4), Inches(5.05), Inches(9.2), Inches(0.4), 11, color=white)
+
+        # ── Slide 14: Platform Strategy (Reels / Carousels / Stories) ──
+        platform_exp = strategy.get("platform_expansion") or {}
+        if platform_exp:
+            s = prs.slides.add_slide(blank); bg(s, dark)
+            bar(s, 0, 0, Inches(10), Inches(0.08), brand_color)
+            txt(s, "Platform Content Strategy", Inches(0.4), Inches(0.3), Inches(9), Inches(0.6), 26, bold=True)
+            formats_data = [
+                ("🎬  REELS",     platform_exp.get("reels",""),    brand_color,  Inches(0.3)),
+                ("📊  CAROUSELS", platform_exp.get("carousels",""), green,        Inches(3.55)),
+                ("📱  STORIES",   platform_exp.get("stories",""),   accent,       Inches(6.8)),
+            ]
+            for fmt_name, fmt_desc, fmt_color, x_pos in formats_data:
+                w = Inches(3.0)
+                bar(s, x_pos, Inches(1.1), w, Inches(3.6), RGBColor(0x1E,0x16,0x40))
+                bar(s, x_pos, Inches(1.1), w, Inches(0.1), fmt_color)
+                txt(s, fmt_name, x_pos + Inches(0.15), Inches(1.25), w - Inches(0.2), Inches(0.5), 14, bold=True, color=fmt_color)
+                txt(s, str(fmt_desc)[:200], x_pos + Inches(0.15), Inches(1.85), w - Inches(0.2), Inches(2.6), 11, color=white)
+
+        # ── Slide 15 (no-IG only): Launch Roadmap ──
+        launch_roadmap = strategy.get("launch_roadmap") or (_ar.get("launch_roadmap") if _ar else None)
+        if not ig_connected and launch_roadmap and isinstance(launch_roadmap, dict):
+            s = prs.slides.add_slide(blank); bg(s, dark)
+            bar(s, 0, 0, Inches(10), Inches(0.08), green)
+            txt(s, "Launch Roadmap", Inches(0.4), Inches(0.3), Inches(9), Inches(0.6), 26, bold=True, color=green)
+            txt(s, "Step-by-step execution plan — tailored to this brand", Inches(0.4), Inches(0.9), Inches(9), Inches(0.4), 13, color=RGBColor(0x9C,0xA3,0xAF), italic=True)
+            phases = [
+                ("Week 1",    launch_roadmap.get("week_1",""),   brand_color, Inches(0.3)),
+                ("Weeks 2-4", launch_roadmap.get("week_2_4",""), green,       Inches(3.55)),
+                ("Month 2-3", launch_roadmap.get("month_2_3",""),accent,      Inches(6.8)),
+            ]
+            for phase_label, phase_desc, phase_color, x_pos in phases:
+                w = Inches(3.0)
+                bar(s, x_pos, Inches(1.5), w, Inches(3.3), RGBColor(0x1E,0x16,0x40))
+                bar(s, x_pos, Inches(1.5), w, Inches(0.1), phase_color)
+                txt(s, phase_label, x_pos + Inches(0.15), Inches(1.65), w - Inches(0.2), Inches(0.45), 15, bold=True, color=phase_color)
+                txt(s, str(phase_desc)[:250], x_pos + Inches(0.15), Inches(2.2), w - Inches(0.2), Inches(2.4), 11, color=white)
 
         # Serialize + upload
         buf = io.BytesIO()
