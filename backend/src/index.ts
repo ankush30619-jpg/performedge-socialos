@@ -17,25 +17,37 @@ import { instagramRoutes } from "./routes/instagram";
 const PORT = parseInt(process.env.PORT ?? "4000");
 const HOST = process.env.HOST ?? "0.0.0.0";
 
-// ── Dev bypass user (set at startup, reused in authenticate decorator) ────────
-let _devUserId = "";
+// ── Bypass user (set at startup, reused in authenticate decorator) ────────────
+// Uses the FIRST real user in DB so existing brands/data are all accessible.
+let _bypassUserId  = "";
+let _bypassEmail   = "";
+let _bypassRole    = "admin";
 
-async function ensureDevUser() {
+async function ensureBypassUser() {
   try {
+    // Prefer the first real user over a dev placeholder
+    const existing = await prisma.user.findFirst({
+      where: { NOT: { email: "dev@socialos.local" } },
+      orderBy: { createdAt: "asc" },
+    });
+    if (existing) {
+      _bypassUserId = existing.id;
+      _bypassEmail  = existing.email;
+      _bypassRole   = existing.role ?? "admin";
+      console.log(`   Bypass auth        →  using real user ${existing.email} (${existing.id})`);
+      return;
+    }
+    // Fallback: create a dev placeholder if no real user exists yet
     const u = await prisma.user.upsert({
       where:  { email: "dev@socialos.local" },
       update: {},
-      create: {
-        email:        "dev@socialos.local",
-        passwordHash: "dev-bypass-no-pw",
-        name:         "Dev User",
-        role:         "admin",
-      },
+      create: { email: "dev@socialos.local", passwordHash: "dev-bypass-no-pw", name: "Dev User", role: "admin" },
     });
-    _devUserId = u.id;
-    console.log(`   Dev bypass         →  ${u.email} (${u.id})`);
+    _bypassUserId = u.id;
+    _bypassEmail  = u.email;
+    console.log(`   Bypass auth        →  created dev placeholder (${u.id})`);
   } catch (e) {
-    console.warn("   Dev bypass         →  ⚠️  could not upsert dev user:", (e as Error).message);
+    console.warn("   Bypass auth        →  ⚠️  could not set up bypass user:", (e as Error).message);
   }
 }
 
@@ -79,7 +91,7 @@ async function main() {
   // ── Auth decorator ───────────────────────────────────────────────────────────
   // When BYPASS_AUTH=true (dev mode), skip JWT and inject the dev user.
   if (process.env.BYPASS_AUTH === "true") {
-    await ensureDevUser();
+    await ensureBypassUser();
   }
 
   app.decorate(
@@ -87,9 +99,9 @@ async function main() {
     async function (req: FastifyRequest, reply: FastifyReply) {
       if (process.env.BYPASS_AUTH === "true") {
         (req as FastifyRequest & { user: unknown }).user = {
-          id:    _devUserId,
-          email: "dev@socialos.local",
-          role:  "admin",
+          id:    _bypassUserId,
+          email: _bypassEmail,
+          role:  _bypassRole,
         };
         return;
       }
@@ -100,6 +112,19 @@ async function main() {
       }
     }
   );
+
+  // ── Bypass token endpoint (no auth needed — frontend auto-login) ──────────────
+  // Only active when BYPASS_AUTH=true. Returns a 30-day JWT for the bypass user.
+  app.get("/api/auth/bypass-token", async (req, reply) => {
+    if (process.env.BYPASS_AUTH !== "true" || !_bypassUserId) {
+      return reply.code(403).send({ message: "Bypass auth not enabled" });
+    }
+    const token = app.jwt.sign(
+      { id: _bypassUserId, email: _bypassEmail, role: _bypassRole },
+      { expiresIn: "30d" }
+    );
+    return reply.send({ token, userId: _bypassUserId, email: _bypassEmail });
+  });
 
   // ── Routes ───────────────────────────────────────────────────────────────────
   await app.register(authRoutes);

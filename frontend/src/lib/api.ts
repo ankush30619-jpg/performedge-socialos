@@ -8,7 +8,7 @@ export const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
-// Attach auth token from cookie/session on every request
+// Attach auth token from localStorage on every request
 api.interceptors.request.use((config) => {
   if (typeof window !== "undefined") {
     const token = localStorage.getItem("socialos_token");
@@ -17,10 +17,54 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Auto-handle errors (auth bypass active — no redirect on 401)
+// ── Auto-login on 401 ─────────────────────────────────────────────────────────
+// If the backend returns 401 (token missing / expired), silently fetch a bypass
+// token from /api/auth/bypass-token (only works when BYPASS_AUTH=true on backend),
+// store it, and retry the original request once.
+let _autoLoginInProgress = false;
+let _autoLoginPromise: Promise<string | null> | null = null;
+
+async function fetchBypassToken(): Promise<string | null> {
+  try {
+    const res = await axios.get(`${API_BASE}/api/auth/bypass-token`);
+    const token = res.data?.token as string | undefined;
+    if (token) {
+      localStorage.setItem("socialos_token", token);
+      return token;
+    }
+  } catch { /* bypass not enabled on backend — ignore */ }
+  return null;
+}
+
 api.interceptors.response.use(
   (res) => res,
-  (err) => Promise.reject(err)
+  async (err) => {
+    const status = err?.response?.status;
+    const originalReq = err?.config;
+
+    // Only auto-retry once on 401, and only for non-auth-endpoint requests
+    if (
+      status === 401 &&
+      !originalReq?._retried &&
+      typeof window !== "undefined" &&
+      !originalReq?.url?.includes("/api/auth/")
+    ) {
+      originalReq._retried = true;
+
+      // Deduplicate: if multiple requests 401 at once, only fetch token once
+      if (!_autoLoginPromise) {
+        _autoLoginPromise = fetchBypassToken().finally(() => { _autoLoginPromise = null; });
+      }
+      const token = await _autoLoginPromise;
+
+      if (token) {
+        originalReq.headers = { ...originalReq.headers, Authorization: `Bearer ${token}` };
+        return axios(originalReq);
+      }
+    }
+
+    return Promise.reject(err);
+  }
 );
 
 // ── Brand API ────────────────────────────────────
