@@ -15,29 +15,44 @@ BACKEND_URL = os.getenv("NEXT_PUBLIC_API_URL", "http://localhost:4000")
 
 
 async def brand_manager_node(state: SocialOSState, event_queue: asyncio.Queue) -> dict:
-    brand_id = state["brand_id"]
+    brand_id      = state["brand_id"]
+    existing_brand = state.get("brand") or {}
 
     await event_queue.put({
-        "type": "agent_progress",
+        "type":     "agent_progress",
         "agentKey": "brandManager",
-        "message": f"Loading brand {brand_id}…",
+        "message":  f"Loading brand {brand_id}…",
     })
 
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.get(
-                f"{BACKEND_URL}/api/brands/{brand_id}",
-                headers={"Authorization": f"Bearer {_get_service_token()}"},
-                timeout=10.0,
-            )
-            brand = resp.json().get("brand", {}) if resp.status_code == 200 else {}
-        except Exception:
-            brand = {"id": brand_id, "name": "Unknown Brand"}
+    # ── Use pre-loaded brand from backend if available ────────────────────────
+    # executePipelineRun fetches from Prisma and passes full brand (incl. decrypted
+    # igAccessToken) so we must NOT refetch from the sanitized API endpoint, which
+    # strips igAccessToken via sanitizeBrand() and would break Meta Graph API calls.
+    if existing_brand.get("id") and existing_brand.get("igAccountId"):
+        brand = existing_brand
+        ig_status = "IG connected ✓" if brand.get("igAccessToken") else "IG token missing"
+        await event_queue.put({
+            "type":     "agent_progress",
+            "agentKey": "brandManager",
+            "message":  f"Brand '{brand.get('name', brand_id)}' loaded from pipeline — {ig_status}",
+        })
+    else:
+        # Fallback: fetch from backend API (igAccessToken will be stripped, but better than crashing)
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.get(
+                    f"{BACKEND_URL}/api/brands/{brand_id}",
+                    headers={"Authorization": f"Bearer {_get_service_token()}"},
+                    timeout=10.0,
+                )
+                brand = resp.json().get("brand", {}) if resp.status_code == 200 else {}
+            except Exception:
+                brand = existing_brand or {"id": brand_id, "name": "Unknown Brand"}
 
     return {
-        "brand": brand,
+        "brand":           brand,
         "brand_knowledge": _build_brand_knowledge(brand),
-        "_message": f"Brand '{brand.get('name', brand_id)}' loaded",
+        "_message":        f"Brand '{brand.get('name', brand_id)}' loaded",
     }
 
 
