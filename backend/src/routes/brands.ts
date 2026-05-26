@@ -79,9 +79,11 @@ export async function brandRoutes(app: FastifyInstance) {
 
   // GET /api/brands
   app.get("/api/brands", auth, async (req, reply) => {
-    const user = req.user as { id: string };
+    const user = req.user as { id: string; bypass?: boolean };
+    // In bypass mode (single-user internal tool) return ALL brands regardless of userId
+    const where = user.bypass ? {} : { userId: user.id };
     const brands = await prisma.brand.findMany({
-      where: { userId: user.id },
+      where,
       orderBy: { createdAt: "desc" },
     });
     return reply.send({ brands: brands.map(b => sanitizeBrand(b as unknown as Record<string, unknown>)) });
@@ -89,9 +91,11 @@ export async function brandRoutes(app: FastifyInstance) {
 
   // GET /api/brands/:id
   app.get("/api/brands/:id", auth, async (req, reply) => {
-    const user = req.user as { id: string };
+    const user = req.user as { id: string; bypass?: boolean };
     const { id } = req.params as { id: string };
-    const brand = await prisma.brand.findFirst({ where: { id, userId: user.id } });
+    // In bypass mode allow access to any brand
+    const where = user.bypass ? { id } : { id, userId: user.id };
+    const brand = await prisma.brand.findFirst({ where });
     if (!brand) return reply.code(404).send({ message: "Brand not found" });
     return reply.send({ brand: sanitizeBrand(brand as unknown as Record<string, unknown>) });
   });
@@ -119,11 +123,11 @@ export async function brandRoutes(app: FastifyInstance) {
 
   // PUT /api/brands/:id
   app.put("/api/brands/:id", auth, async (req, reply) => {
-    const user = req.user as { id: string };
+    const user = req.user as { id: string; bypass?: boolean };
     const { id } = req.params as { id: string };
     const data = brandSchema.partial().parse(req.body);
 
-    const existing = await prisma.brand.findFirst({ where: { id, userId: user.id } });
+    const existing = await prisma.brand.findFirst({ where: user.bypass ? { id } : { id, userId: user.id } });
     if (!existing) return reply.code(404).send({ message: "Brand not found" });
 
     // Destructure JSON fields out of data so we can cast them separately
@@ -150,9 +154,9 @@ export async function brandRoutes(app: FastifyInstance) {
 
   // DELETE /api/brands/:id
   app.delete("/api/brands/:id", auth, async (req, reply) => {
-    const user = req.user as { id: string };
+    const user = req.user as { id: string; bypass?: boolean };
     const { id } = req.params as { id: string };
-    const existing = await prisma.brand.findFirst({ where: { id, userId: user.id } });
+    const existing = await prisma.brand.findFirst({ where: user.bypass ? { id } : { id, userId: user.id } });
     if (!existing) return reply.code(404).send({ message: "Brand not found" });
     await prisma.brand.delete({ where: { id } });
     return reply.code(204).send();
@@ -160,9 +164,9 @@ export async function brandRoutes(app: FastifyInstance) {
 
   // POST /api/brands/:id/relearn — trigger self-learning manually
   app.post("/api/brands/:id/relearn", auth, async (req, reply) => {
-    const user = req.user as { id: string };
+    const user = req.user as { id: string; bypass?: boolean };
     const { id } = req.params as { id: string };
-    const existing = await prisma.brand.findFirst({ where: { id, userId: user.id } });
+    const existing = await prisma.brand.findFirst({ where: user.bypass ? { id } : { id, userId: user.id } });
     if (!existing) return reply.code(404).send({ message: "Brand not found" });
 
     const job = await learningQueue.add("brand-relearn", {
@@ -176,10 +180,10 @@ export async function brandRoutes(app: FastifyInstance) {
 
   // GET /api/brands/:id/learning-logs — last 20 learning events
   app.get("/api/brands/:id/learning-logs", auth, async (req, reply) => {
-    const user = req.user as { id: string };
+    const user = req.user as { id: string; bypass?: boolean };
     const { id } = req.params as { id: string };
 
-    const brand = await prisma.brand.findFirst({ where: { id, userId: user.id } });
+    const brand = await prisma.brand.findFirst({ where: user.bypass ? { id } : { id, userId: user.id } });
     if (!brand) return reply.code(404).send({ message: "Brand not found" });
 
     const logs = await prisma.brandLearningLog.findMany({
