@@ -111,11 +111,13 @@ async def research_agent_node(state: SocialOSState, event_queue: asyncio.Queue) 
     q1 = f"viral Instagram Reels content ideas {niche} {industry} creators 2025 trending formats hooks"
     q2 = f"{niche} audience problems challenges {target_audience} {pain_points} solutions content"
     q3 = f"Instagram growth tactics {niche} engagement rate increase {industry} best practices"
-    q4 = f"trending topics {niche} {industry} latest news developments audience interests"
-    q5 = (
+    q4 = f"TikTok trends {niche} viral formats 2025 short-form video hooks creators"
+    q5 = f"YouTube Shorts viral {niche} content ideas trending topics format breakdown"
+    q6 = f"trending topics {niche} {industry} latest news developments audience interests"
+    q7 = (
         f"best hashtags {niche} Instagram content {industry} {target_audience} niche strategy"
         if not comp_str else
-        f"{comp_str} Instagram content strategy {niche} what works competitors analysis"
+        f"{comp_str} Instagram TikTok content strategy {niche} what works competitors analysis"
     )
 
     await event_queue.put({
@@ -128,8 +130,10 @@ async def research_agent_node(state: SocialOSState, event_queue: asyncio.Queue) 
         _tavily(q1, 6, "advanced"),
         _tavily(q2, 5, "advanced"),
         _tavily(q3, 5, "basic"),
-        _tavily(q4, 5, "basic"),
-        _tavily(q5, 5, "basic"),
+        _tavily(q4, 5, "advanced"),  # TikTok trends
+        _tavily(q5, 5, "advanced"),  # YouTube Shorts
+        _tavily(q6, 5, "basic"),
+        _tavily(q7, 5, "basic"),
         return_exceptions=True,
     )
 
@@ -184,6 +188,9 @@ async def research_agent_node(state: SocialOSState, event_queue: asyncio.Queue) 
             "hashtag_clusters":        synthesis.get("hashtag_clusters", {}),
             "hashtags":                synthesis.get("hashtags", []),
             "posting_insights":        synthesis.get("posting_insights", []),
+            "tiktok_formats":          synthesis.get("tiktok_formats", []),
+            "youtube_shorts_angles":   synthesis.get("youtube_shorts_angles", []),
+            "viral_formats":           synthesis.get("viral_formats", []),
             "niche":                   niche,
             "industry":                industry,
         },
@@ -252,13 +259,19 @@ async def _synthesise_research(
                         f"niche (15-20 hashtags with 10K-500K posts), brand (5-8 brand-specific hashtags for {name}/{niche})\n"
                         f"hashtags: flat list of 25 best hashtags combining all clusters\n"
                         f"posting_insights: list of 4 specific insights about what posting style, format, or timing "
-                        f"works best for {niche} on Instagram right now"
+                        f"works best for {niche} on Instagram right now\n"
+                        f"tiktok_formats: list of 4 specific TikTok formats currently viral for {niche} that "
+                        f"can be adapted to Instagram Reels (name the format + why it works)\n"
+                        f"youtube_shorts_angles: list of 3 specific YouTube Shorts angles trending in {niche} — "
+                        f"each is a post idea adaptable to Reels\n"
+                        f"viral_formats: list of 4 specific format names with a 1-sentence description "
+                        f"(e.g. 'POV transformation', 'Day-in-the-life with text overlays', 'Greenscreen reaction')"
                     ),
                 },
             ],
             response_format={"type": "json_object"},
             temperature=0.4,
-            max_tokens=2000,
+            max_tokens=3500,
         )
         return json.loads(resp.choices[0].message.content)
     except Exception as e:
