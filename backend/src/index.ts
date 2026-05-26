@@ -160,7 +160,7 @@ async function main() {
   app.get("/health", async () => ({
     status: "ok",
     service: "socialos-backend",
-    version: "1.0.1",
+    version: "1.0.2",
     ts: new Date().toISOString(),
   }));
 
