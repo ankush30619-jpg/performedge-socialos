@@ -173,6 +173,122 @@ export async function metaRoutes(app: FastifyInstance) {
     );
   });
 
+  // POST /api/meta/manual-connect
+  // Simple token-based connection — paste Page Access Token + optional IG Account ID + optional Page ID
+  // Pass testOnly: true to validate without saving to DB
+  app.post(
+    "/api/meta/manual-connect",
+    { preHandler: [app.authenticate] },
+    async (req, reply) => {
+      const { brandId, accessToken, igAccountId, pageId, testOnly } = z.object({
+        brandId:     z.string(),
+        accessToken: z.string().min(10),
+        igAccountId: z.string().optional(),
+        pageId:      z.string().optional(),
+        testOnly:    z.boolean().optional(),
+      }).parse(req.body);
+
+      let igId       = igAccountId ?? "";
+      let igUsername = "";
+      let igFollowers = 0;
+      let resolvedPageId   = pageId ?? "";
+      let resolvedPageName = "";
+
+      try {
+        if (igId) {
+          // Fetch IG details directly using the provided account ID
+          const igRes  = await fetch(
+            `https://graph.facebook.com/v21.0/${igId}?fields=username,followers_count,name&access_token=${accessToken}`
+          );
+          const igData = await igRes.json() as {
+            username?: string; followers_count?: number; error?: { message: string };
+          };
+          if (igData.error) {
+            return reply.code(400).send({ message: `Meta API error: ${igData.error.message}` });
+          }
+          igUsername  = igData.username  ?? "";
+          igFollowers = igData.followers_count ?? 0;
+
+          // If pageId was provided, fetch the page name too
+          if (resolvedPageId) {
+            try {
+              const pageRes  = await fetch(
+                `https://graph.facebook.com/v21.0/${resolvedPageId}?fields=name&access_token=${accessToken}`
+              );
+              const pageData = await pageRes.json() as { name?: string };
+              resolvedPageName = pageData.name ?? "";
+            } catch { /* non-fatal */ }
+          }
+        } else {
+          // Auto-discover IG account from Facebook Pages linked to this token
+          const pagesRes  = await fetch(
+            `https://graph.facebook.com/v21.0/me/accounts?fields=id,name,instagram_business_account{id,username,followers_count}&access_token=${accessToken}`
+          );
+          const pagesData = await pagesRes.json() as {
+            data?: Array<{
+              id: string; name: string;
+              instagram_business_account?: { id: string; username: string; followers_count?: number };
+            }>;
+            error?: { message: string };
+          };
+          if (pagesData.error) {
+            return reply.code(400).send({ message: `Meta API error: ${pagesData.error.message}` });
+          }
+          const page  = pagesData.data?.find(p => p.instagram_business_account);
+          const igAcc = page?.instagram_business_account;
+          if (!igAcc) {
+            return reply.code(400).send({
+              message: "No Instagram Business Account found. Make sure this is a Page Access Token linked to an Instagram Business account.",
+            });
+          }
+          igId             = igAcc.id;
+          igUsername       = igAcc.username;
+          igFollowers      = igAcc.followers_count ?? 0;
+          resolvedPageId   = page?.id   ?? "";
+          resolvedPageName = page?.name ?? "";
+        }
+      } catch {
+        return reply.code(500).send({ message: "Failed to validate token with Meta API" });
+      }
+
+      // If testOnly: true — return the validated data without saving
+      if (testOnly) {
+        return reply.send({
+          success: true,
+          igAccountId: igId,
+          igUsername,
+          igFollowers,
+          pageId:   resolvedPageId,
+          pageName: resolvedPageName,
+        });
+      }
+
+      // Encrypt & persist
+      const encrypted      = encryptToken(accessToken);
+      const tokenExpiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000); // 60 days
+
+      await prisma.brand.update({
+        where: { id: brandId },
+        data: {
+          igAccountId:      igId,
+          igAccessToken:    encrypted,
+          igTokenExpiresAt: tokenExpiresAt,
+          igUsername,
+          igFollowers,
+        },
+      });
+
+      return reply.send({
+        success:     true,
+        igAccountId: igId,
+        igUsername,
+        igFollowers,
+        pageId:      resolvedPageId,
+        pageName:    resolvedPageName,
+      });
+    }
+  );
+
   // POST /api/meta/disconnect
   // Removes IG credentials for a brand
   app.post(
