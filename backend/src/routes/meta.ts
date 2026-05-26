@@ -173,6 +173,84 @@ export async function metaRoutes(app: FastifyInstance) {
     );
   });
 
+  // POST /api/meta/manual-connect
+  // Simple token-based connection — paste Page Access Token + optional IG Account ID
+  app.post(
+    "/api/meta/manual-connect",
+    { preHandler: [app.authenticate] },
+    async (req, reply) => {
+      const { brandId, accessToken, igAccountId } = z.object({
+        brandId:     z.string(),
+        accessToken: z.string().min(10),
+        igAccountId: z.string().optional(),
+      }).parse(req.body);
+
+      let igId       = igAccountId ?? "";
+      let igUsername = "";
+      let igFollowers = 0;
+
+      try {
+        if (igId) {
+          // Fetch IG details directly using the provided account ID
+          const igRes  = await fetch(
+            `https://graph.facebook.com/v21.0/${igId}?fields=username,followers_count,name&access_token=${accessToken}`
+          );
+          const igData = await igRes.json() as {
+            username?: string; followers_count?: number; error?: { message: string };
+          };
+          if (igData.error) {
+            return reply.code(400).send({ message: `Meta API error: ${igData.error.message}` });
+          }
+          igUsername  = igData.username  ?? "";
+          igFollowers = igData.followers_count ?? 0;
+        } else {
+          // Auto-discover IG account from Facebook Pages linked to this token
+          const pagesRes  = await fetch(
+            `https://graph.facebook.com/v21.0/me/accounts?fields=id,name,instagram_business_account{id,username,followers_count}&access_token=${accessToken}`
+          );
+          const pagesData = await pagesRes.json() as {
+            data?: Array<{
+              id: string;
+              instagram_business_account?: { id: string; username: string; followers_count?: number };
+            }>;
+            error?: { message: string };
+          };
+          if (pagesData.error) {
+            return reply.code(400).send({ message: `Meta API error: ${pagesData.error.message}` });
+          }
+          const igAcc = pagesData.data?.find(p => p.instagram_business_account)?.instagram_business_account;
+          if (!igAcc) {
+            return reply.code(400).send({
+              message: "No Instagram Business Account found. Make sure this is a Page Access Token linked to an Instagram Business account.",
+            });
+          }
+          igId        = igAcc.id;
+          igUsername  = igAcc.username;
+          igFollowers = igAcc.followers_count ?? 0;
+        }
+      } catch {
+        return reply.code(500).send({ message: "Failed to validate token with Meta API" });
+      }
+
+      // Encrypt & persist
+      const encrypted      = encryptToken(accessToken);
+      const tokenExpiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000); // 60 days
+
+      await prisma.brand.update({
+        where: { id: brandId },
+        data: {
+          igAccountId:      igId,
+          igAccessToken:    encrypted,
+          igTokenExpiresAt: tokenExpiresAt,
+          igUsername,
+          igFollowers,
+        },
+      });
+
+      return reply.send({ success: true, igAccountId: igId, igUsername, igFollowers });
+    }
+  );
+
   // POST /api/meta/disconnect
   // Removes IG credentials for a brand
   app.post(

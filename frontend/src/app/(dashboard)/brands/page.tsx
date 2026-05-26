@@ -1245,95 +1245,186 @@ function SectionHint({ icon: Icon, title, desc }: { icon: React.ComponentType<{ 
 function InstagramConnectStep({
   brandId, igUsername, igAccountId, onConnected,
 }: { brandId?: string; igUsername?: string; igAccountId?: string; onConnected?: (u: string) => void }) {
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading]           = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [tokenInput, setTokenInput]     = useState("");
+  const [accountIdInput, setAccountIdInput] = useState(igAccountId ?? "");
+  const [connectError, setConnectError] = useState("");
+  const [successInfo, setSuccessInfo]   = useState<{ username: string; followers: number } | null>(null);
   const queryClient = useQueryClient();
 
-  async function handleConnect() {
-    if (!brandId) {
-      alert("Please save the brand first, then connect Instagram from Edit Brand.");
-      return;
-    }
+  const isConnected = !!(igUsername || (igAccountId && igAccountId !== ""));
+
+  async function handleManualConnect() {
+    if (!brandId) { setConnectError("Save the brand first, then connect Instagram."); return; }
+    if (!tokenInput.trim()) { setConnectError("Page Access Token is required."); return; }
     setLoading(true);
+    setConnectError("");
     try {
-      const res = await api.get(`/api/meta/auth-url?brandId=${brandId}`);
-      window.location.href = res.data.url;
-    } catch { setLoading(false); }
+      const res = await api.post("/api/meta/manual-connect", {
+        brandId,
+        accessToken: tokenInput.trim(),
+        igAccountId: accountIdInput.trim() || undefined,
+      });
+      const { igUsername: u, igFollowers: f, igAccountId: id } = res.data;
+      setSuccessInfo({ username: u, followers: f });
+      setTokenInput("");
+      queryClient.invalidateQueries({ queryKey: ["brands"] });
+      onConnected?.(u ?? id);
+    } catch (err: any) {
+      setConnectError(err?.response?.data?.message ?? "Connection failed. Check your token and try again.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleDisconnect() {
     if (!brandId) return;
     setDisconnecting(true);
+    setSuccessInfo(null);
     try {
       await api.post("/api/meta/disconnect", { brandId });
       queryClient.invalidateQueries({ queryKey: ["brands"] });
     } finally { setDisconnecting(false); }
   }
 
-  const isConnected = !!(igUsername || igAccountId);
+  const displayUsername = successInfo?.username ?? igUsername;
+  const displayConnected = isConnected || !!successInfo;
 
   return (
     <div className="space-y-4">
+      {/* Header */}
       <div className="p-4 rounded-xl bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/20">
         <div className="flex items-center gap-2 mb-1">
           <Instagram className="w-4 h-4 text-pink-400" />
           <p className="text-sm font-medium text-white">Instagram Business Connection</p>
         </div>
         <p className="text-xs text-white/40">
-          Connect via Meta OAuth to enable real analytics, publishing insights, and automated posting.
+          Paste your Page Access Token to connect Instagram and enable real-time analytics.
         </p>
       </div>
 
-      {isConnected ? (
+      {displayConnected ? (
+        /* ── Connected state ── */
         <div className="p-4 rounded-xl bg-green-500/10 border border-green-500/20 space-y-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
               <Instagram className="w-5 h-5 text-white" />
             </div>
             <div>
-              <p className="text-sm font-semibold text-white">{igUsername ? `@${igUsername}` : "Instagram Connected"}</p>
-              {igAccountId && <p className="text-xs text-white/40 font-mono">ID: {igAccountId}</p>}
+              <p className="text-sm font-semibold text-white">
+                {displayUsername ? `@${displayUsername}` : "Instagram Connected"}
+              </p>
+              {successInfo && (
+                <p className="text-xs text-green-400">{successInfo.followers.toLocaleString()} followers synced ✓</p>
+              )}
+              {(igAccountId && !successInfo) && (
+                <p className="text-xs text-white/40 font-mono">ID: {igAccountId}</p>
+              )}
             </div>
             <CheckCircle2 className="w-5 h-5 text-green-400 ml-auto" />
           </div>
-          <div className="flex gap-2">
-            <button onClick={handleConnect} disabled={loading} className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium bg-white/[0.06] hover:bg-white/[0.10] text-white/70 border border-white/[0.08]">
-              <Link2 className="w-3.5 h-3.5" /> Reconnect
-            </button>
-            <button onClick={handleDisconnect} disabled={disconnecting} className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20">
-              {disconnecting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2Off className="w-3.5 h-3.5" />}
-              Disconnect
-            </button>
-          </div>
+          <button
+            onClick={handleDisconnect}
+            disabled={disconnecting}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 transition-all"
+          >
+            {disconnecting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2Off className="w-3.5 h-3.5" />}
+            Disconnect
+          </button>
+          {/* Allow re-entering token to refresh */}
+          <details className="group">
+            <summary className="text-xs text-white/30 cursor-pointer hover:text-white/50 transition-colors">
+              Update / refresh token
+            </summary>
+            <div className="mt-3 space-y-2">
+              <input
+                type="password"
+                value={tokenInput}
+                onChange={e => setTokenInput(e.target.value)}
+                placeholder="New Page Access Token"
+                className="w-full px-3 py-2 rounded-lg bg-white/[0.06] border border-white/[0.10] text-white text-xs placeholder-white/30 focus:outline-none focus:border-purple-500/50"
+              />
+              <button
+                onClick={handleManualConnect}
+                disabled={loading || !tokenInput}
+                className="w-full py-2 rounded-lg text-xs font-medium bg-purple-600/30 hover:bg-purple-600/50 text-white border border-purple-500/30 disabled:opacity-40 transition-all"
+              >
+                {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin inline mr-1" /> : null}
+                Update Token
+              </button>
+            </div>
+          </details>
         </div>
       ) : (
+        /* ── Not connected — manual token form ── */
         <div className="space-y-3">
-          <button onClick={handleConnect} disabled={loading}
-            className="w-full flex items-center justify-center gap-3 px-4 py-4 rounded-xl bg-gradient-to-r from-purple-600/20 to-pink-600/20 border border-purple-500/30 hover:border-purple-500/60 hover:from-purple-600/30 hover:to-pink-600/30 transition-all disabled:opacity-50 group">
-            {loading ? <Loader2 className="w-5 h-5 text-pink-400 animate-spin" /> : <Instagram className="w-5 h-5 text-pink-400 group-hover:scale-110 transition-transform" />}
-            <div className="text-left">
-              <p className="text-sm font-semibold text-white">{loading ? "Redirecting to Meta…" : "Connect Instagram Business"}</p>
-              <p className="text-xs text-white/40">Securely authorise via Meta OAuth 2.0</p>
-            </div>
-          </button>
           {!brandId && (
             <div className="p-3 rounded-xl bg-yellow-500/5 border border-yellow-500/20">
-              <p className="text-xs text-yellow-400/80"><span className="font-semibold">Note:</span> Create/save the brand first, then connect Instagram from Edit Brand.</p>
+              <p className="text-xs text-yellow-400/80">
+                <span className="font-semibold">Note:</span> Save the brand first, then connect Instagram from Edit Brand.
+              </p>
             </div>
           )}
-          <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-            <p className="text-xs text-white/40 font-medium mb-1.5">What we request access to:</p>
-            <ul className="text-xs text-white/30 space-y-1">
-              <li>• instagram_basic — Read account info & media</li>
-              <li>• instagram_content_publish — Schedule & publish posts</li>
-              <li>• instagram_manage_insights — Analytics & reach data</li>
-              <li>• pages_show_list — Access linked Facebook Pages</li>
-            </ul>
+
+          {/* Page Access Token */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-white/60">Page Access Token <span className="text-pink-400">*</span></label>
+            <input
+              type="password"
+              value={tokenInput}
+              onChange={e => { setTokenInput(e.target.value); setConnectError(""); }}
+              placeholder="Paste your long-lived Page Access Token here"
+              className="w-full px-3 py-2.5 rounded-lg bg-white/[0.06] border border-white/[0.10] text-white text-sm placeholder-white/20 focus:outline-none focus:border-purple-500/50 transition-colors"
+            />
           </div>
-          <div className="p-3 rounded-xl bg-brand/5 border border-brand/20">
-            <p className="text-xs text-white/40">
-              <span className="font-semibold text-brand-light">Optional</span> — Skip this step. Connect Instagram later from the Edit Brand menu.
-            </p>
+
+          {/* Instagram Account ID (optional) */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-white/60">
+              Instagram Business Account ID <span className="text-white/30">(optional — auto-detected)</span>
+            </label>
+            <input
+              type="text"
+              value={accountIdInput}
+              onChange={e => setAccountIdInput(e.target.value)}
+              placeholder="e.g. 17841478318822819"
+              className="w-full px-3 py-2.5 rounded-lg bg-white/[0.06] border border-white/[0.10] text-white text-sm placeholder-white/20 focus:outline-none focus:border-purple-500/50 transition-colors font-mono"
+            />
+          </div>
+
+          {/* Error */}
+          {connectError && (
+            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+              <p className="text-xs text-red-400">{connectError}</p>
+            </div>
+          )}
+
+          {/* Connect button */}
+          <button
+            onClick={handleManualConnect}
+            disabled={loading || !tokenInput.trim() || !brandId}
+            className="w-full flex items-center justify-center gap-3 px-4 py-3.5 rounded-xl bg-gradient-to-r from-purple-600/20 to-pink-600/20 border border-purple-500/30 hover:border-purple-500/60 hover:from-purple-600/30 hover:to-pink-600/30 transition-all disabled:opacity-40"
+          >
+            {loading
+              ? <Loader2 className="w-5 h-5 text-pink-400 animate-spin" />
+              : <Instagram className="w-5 h-5 text-pink-400" />
+            }
+            <div className="text-left">
+              <p className="text-sm font-semibold text-white">{loading ? "Connecting…" : "Connect Instagram"}</p>
+              <p className="text-xs text-white/40">Token is encrypted and stored securely</p>
+            </div>
+          </button>
+
+          {/* Helper info */}
+          <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+            <p className="text-xs text-white/50 font-medium mb-2">How to get your Page Access Token:</p>
+            <ol className="text-xs text-white/30 space-y-1 list-decimal list-inside">
+              <li>Go to <span className="text-white/50 font-mono">developers.facebook.com</span> → Tools → Graph API Explorer</li>
+              <li>Select your Facebook App → Get Token → Get Page Access Token</li>
+              <li>Select the Facebook Page linked to @mishikaselectronics</li>
+              <li>Copy the token and paste above</li>
+            </ol>
           </div>
         </div>
       )}
