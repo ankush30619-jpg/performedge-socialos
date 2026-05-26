@@ -215,12 +215,6 @@ def _build_brand_knowledge(brand: dict) -> dict:
     worst_content   = brand.get("worstContent", "")
     competitors     = brand.get("competitors") or []
 
-    # ── Manual Instagram stats (from knowledgeJson when IG not connected) ────
-    manual_followers     = existing.get("manualFollowers", 0) or 0
-    manual_follower_goal = existing.get("manualFollowerGoal", 0) or 0
-    manual_avg_likes     = existing.get("manualAvgLikes", 0) or 0
-    manual_avg_comments  = existing.get("manualAvgComments", 0) or 0
-
     # ── Build a single rich context string for LLM prompts ───────────────────
     lines = [f"=== BRAND BRIEF: {name.upper()} ==="]
     if niche:           lines.append(f"Niche: {niche}")
@@ -267,20 +261,6 @@ def _build_brand_knowledge(brand: dict) -> dict:
     if competitors:
         lines.append("")
         lines.append(f"Known competitors: {', '.join(str(c) for c in competitors[:6])}")
-
-    if manual_followers:
-        lines.append("")
-        lines.append("--- INSTAGRAM STATS (Manual) ---")
-        lines.append(f"Current followers: {manual_followers:,}")
-        if manual_follower_goal:
-            lines.append(f"Follower goal: {manual_follower_goal:,}")
-        if manual_avg_likes:
-            lines.append(f"Average likes per post: {manual_avg_likes:,}")
-        if manual_avg_comments:
-            lines.append(f"Average comments per post: {manual_avg_comments:,}")
-        if manual_followers > 0 and manual_avg_likes > 0:
-            er = round(((manual_avg_likes + manual_avg_comments) / manual_followers) * 100, 2)
-            lines.append(f"Estimated engagement rate: {er}%")
 
     context_block = "\n".join(lines)
 
@@ -332,12 +312,6 @@ def _build_brand_knowledge(brand: dict) -> dict:
 
         # ── Pre-formatted context for LLM prompts ────────────────────
         "context_block": context_block,
-
-        # ── Manual Instagram stats (fallback when IG not connected) ──
-        "manualFollowers":     manual_followers,
-        "manualFollowerGoal":  manual_follower_goal,
-        "manualAvgLikes":      manual_avg_likes,
-        "manualAvgComments":   manual_avg_comments,
 
         # ── Existing AI knowledge (self-learning data) ───────────────
         **existing,

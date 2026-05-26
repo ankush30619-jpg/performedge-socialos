@@ -92,10 +92,6 @@ type FormState = {
   igAccountId: string;
   igAccessToken: string;
   knowledgeText: string;
-  manualFollowers: number | "";
-  manualFollowerGoal: number | "";
-  manualAvgLikes: number | "";
-  manualAvgComments: number | "";
 };
 
 const emptyForm = (): FormState => ({
@@ -111,7 +107,6 @@ const emptyForm = (): FormState => ({
   contentPillars: [], idealVideoLength: "", hookFormulas: "", bestHooks: "", worstContent: "",
   competitors: [], campaignUrls: [], brandMediaUrls: [],
   igAccountId: "", igAccessToken: "", knowledgeText: "",
-  manualFollowers: "", manualFollowerGoal: "", manualAvgLikes: "", manualAvgComments: "",
 });
 
 function brandToForm(brand: Brand): FormState {
@@ -160,10 +155,6 @@ function brandToForm(brand: Brand): FormState {
     igAccountId: brand.igAccountId ?? "",
     igAccessToken: brand.igAccessToken ?? "",
     knowledgeText: typeof kj?.description === "string" ? kj.description : "",
-    manualFollowers: typeof kj?.manualFollowers === "number" ? kj.manualFollowers : "",
-    manualFollowerGoal: typeof kj?.manualFollowerGoal === "number" ? kj.manualFollowerGoal : "",
-    manualAvgLikes: typeof kj?.manualAvgLikes === "number" ? kj.manualAvgLikes : "",
-    manualAvgComments: typeof kj?.manualAvgComments === "number" ? kj.manualAvgComments : "",
   };
 }
 
@@ -212,15 +203,7 @@ function formToPayload(form: FormState) {
     brandMediaUrls: form.brandMediaUrls.length > 0 ? form.brandMediaUrls : undefined,
     igAccountId: form.igAccountId || undefined,
     igAccessToken: form.igAccessToken || undefined,
-    knowledgeJson: (() => {
-      const kj: Record<string, unknown> = {};
-      if (form.knowledgeText) kj.description = form.knowledgeText;
-      if (form.manualFollowers !== "") kj.manualFollowers = Number(form.manualFollowers);
-      if (form.manualFollowerGoal !== "") kj.manualFollowerGoal = Number(form.manualFollowerGoal);
-      if (form.manualAvgLikes !== "") kj.manualAvgLikes = Number(form.manualAvgLikes);
-      if (form.manualAvgComments !== "") kj.manualAvgComments = Number(form.manualAvgComments);
-      return Object.keys(kj).length > 0 ? kj : undefined;
-    })(),
+    knowledgeJson: form.knowledgeText ? { description: form.knowledgeText } : undefined,
   };
 }
 
@@ -1171,65 +1154,6 @@ function BrandFormModal({
                 igAccountId={brand?.igAccountId}
                 onConnected={(username) => setForm(f => ({ ...f, igAccountId: username }))}
               />
-
-              {/* Manual Instagram stats — shown when IG not connected */}
-              {!brand?.igAccountId && !form.igAccountId && (
-                <div className="mt-4 p-4 rounded-xl bg-white/[0.03] border border-white/[0.08]">
-                  <div className="flex items-center gap-2 mb-1">
-                    <BarChart2 className="w-4 h-4 text-brand-light" />
-                    <p className="text-sm font-medium text-white">Instagram Stats (Manual Entry)</p>
-                  </div>
-                  <p className="text-xs text-white/40 mb-3">
-                    No Instagram connected? Enter your current stats so the AI generates accurate PPTs and growth plans.
-                  </p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="field-label">Current Followers</label>
-                      <input
-                        type="number"
-                        min="0"
-                        className="input-glass w-full"
-                        placeholder="e.g. 1500"
-                        value={form.manualFollowers}
-                        onChange={e => setForm(f => ({ ...f, manualFollowers: e.target.value === "" ? "" : Number(e.target.value) }))}
-                      />
-                    </div>
-                    <div>
-                      <label className="field-label">Follower Goal (this month)</label>
-                      <input
-                        type="number"
-                        min="0"
-                        className="input-glass w-full"
-                        placeholder="e.g. 2000"
-                        value={form.manualFollowerGoal}
-                        onChange={e => setForm(f => ({ ...f, manualFollowerGoal: e.target.value === "" ? "" : Number(e.target.value) }))}
-                      />
-                    </div>
-                    <div>
-                      <label className="field-label">Avg Likes per Post</label>
-                      <input
-                        type="number"
-                        min="0"
-                        className="input-glass w-full"
-                        placeholder="e.g. 80"
-                        value={form.manualAvgLikes}
-                        onChange={e => setForm(f => ({ ...f, manualAvgLikes: e.target.value === "" ? "" : Number(e.target.value) }))}
-                      />
-                    </div>
-                    <div>
-                      <label className="field-label">Avg Comments per Post</label>
-                      <input
-                        type="number"
-                        min="0"
-                        className="input-glass w-full"
-                        placeholder="e.g. 12"
-                        value={form.manualAvgComments}
-                        onChange={e => setForm(f => ({ ...f, manualAvgComments: e.target.value === "" ? "" : Number(e.target.value) }))}
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
 
               <div className="mt-4">
                 <div className="p-4 rounded-xl bg-gradient-to-r from-brand/10 to-indigo-500/10 border border-brand/20 mb-3">

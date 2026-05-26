@@ -67,37 +67,17 @@ async def analyst_node(state: SocialOSState, event_queue: asyncio.Queue) -> dict
             })
 
     # ── GPT strategic baseline path (no IG or API error) ────────────────────
-    manual_followers     = brand_knowledge.get("manualFollowers", 0) or 0
-    manual_follower_goal = brand_knowledge.get("manualFollowerGoal", 0) or 0
-    manual_avg_likes     = brand_knowledge.get("manualAvgLikes", 0) or 0
-    manual_avg_comments  = brand_knowledge.get("manualAvgComments", 0) or 0
+    await event_queue.put({
+        "type": "agent_progress",
+        "agentKey": "analyst",
+        "message": "No Instagram connected — building strategic brand-led baseline (connect IG for live metrics)…",
+    })
 
-    has_manual_stats = manual_followers > 0
-
-    if has_manual_stats:
-        await event_queue.put({
-            "type": "agent_progress",
-            "agentKey": "analyst",
-            "message": f"Using manual stats ({manual_followers:,} followers) — building AI-powered growth analysis…",
-        })
-    else:
-        await event_queue.put({
-            "type": "agent_progress",
-            "agentKey": "analyst",
-            "message": "Building strategic brand baseline with AI…",
-        })
-
-    report = await _generate_baseline_report(
-        name, niche, audience, tone, brand_knowledge,
-        manual_followers, manual_follower_goal, manual_avg_likes, manual_avg_comments
-    )
+    report = await _generate_baseline_report(name, niche, audience, tone, brand_knowledge)
 
     return {
         "analyst_report": report,
-        "_message": (
-            f"Brand analysis ready for {name}"
-            + (f" — {manual_followers:,} followers" if has_manual_stats else " (no IG connected)")
-        ),
+        "_message": f"Strategic baseline ready for {name} — connect Instagram for live analytics",
     }
 
 
@@ -290,42 +270,19 @@ async def _gpt_insights_from_data(name, niche, followers, eng_rate, avg_reach, p
         return {}
 
 
-async def _generate_baseline_report(
-    name, niche, audience, tone, brand_knowledge,
-    manual_followers: int = 0, manual_follower_goal: int = 0,
-    manual_avg_likes: int = 0, manual_avg_comments: int = 0
-) -> dict:
-    """GPT-only baseline when no Instagram connected.
-    Uses manual stats if provided to generate real numbers in the report."""
+async def _generate_baseline_report(name, niche, audience, tone, brand_knowledge) -> dict:
+    """Deep strategic baseline when no Instagram is connected.
+    Focuses on brand-led strategy — NOT fake metrics. Downstream agents will
+    skip metric-heavy framing when ig_connected is false."""
     oai = _get_oai()
     if not oai:
-        return _fallback_report(name, niche, manual_followers)
+        return _fallback_report(name, niche)
 
     context_block = ""
     if isinstance(brand_knowledge, dict):
         context_block = brand_knowledge.get("context_block", "") or ""
         if not context_block:
             context_block = brand_knowledge.get("description", "") or ""
-
-    # Compute estimated engagement rate from manual stats
-    avg_er = 0.0
-    avg_reach = 0
-    if manual_followers > 0 and manual_avg_likes > 0:
-        avg_er = round(((manual_avg_likes + manual_avg_comments) / manual_followers) * 100, 2)
-        avg_reach = int(manual_followers * 0.15)  # ~15% reach estimate
-
-    has_manual = manual_followers > 0
-
-    stats_section = ""
-    if has_manual:
-        stats_section = (
-            f"\nCurrent Instagram Stats (manually entered):\n"
-            f"- Current Followers: {manual_followers:,}\n"
-            + (f"- Follower Goal: {manual_follower_goal:,}\n" if manual_follower_goal else "")
-            + (f"- Avg Likes per Post: {manual_avg_likes:,}\n" if manual_avg_likes else "")
-            + (f"- Avg Comments per Post: {manual_avg_comments:,}\n" if manual_avg_comments else "")
-            + (f"- Estimated Engagement Rate: {avg_er}%\n" if avg_er else "")
-        )
 
     try:
         resp = await oai.chat.completions.create(
@@ -334,64 +291,53 @@ async def _generate_baseline_report(
                 {
                     "role": "system",
                     "content": (
-                        f"You are a senior Instagram growth analyst specialising in {niche}. "
-                        f"Create a specific, data-informed brand analysis in JSON. "
-                        f"Every insight must be specific to {niche} and {name}'s situation — no generic advice."
+                        f"You are a senior Instagram growth strategist for {niche} brands. "
+                        f"Build a deep brand-led strategic analysis. Since this brand has no Instagram "
+                        f"connected yet, you will NOT fabricate metrics. Instead, you will analyse the brand "
+                        f"itself — positioning, audience, content potential, competitive position — and produce "
+                        f"a high-quality launch/growth plan that is genuinely specific to {name}."
                     ),
                 },
                 {
                     "role": "user",
                     "content": (
-                        f"Brand: {name} | Niche: {niche} | Audience: {audience} | Tone: {tone}\n"
-                        f"{stats_section}"
-                        f"Brand context: {context_block[:500] if context_block else 'N/A'}\n\n"
-                        + (
-                            f"Based on these REAL stats for {name}, generate a detailed growth analysis JSON with:\n"
-                            f"brand_strengths: list of 3-4 strengths specific to {name}'s situation\n"
-                            f"content_opportunities: list of 3-4 specific {niche} content opportunities\n"
-                            f"audience_insights: object with pain_points (list), motivations (list), content_preferences (list)\n"
-                            f"benchmark_metrics: object with industry_avg_engagement (string), "
-                            f"typical_follower_growth_monthly (string), best_content_type (string)\n"
-                            f"content_recommendations: list of 4-5 actionable recommendations based on current {manual_followers:,} followers\n"
-                            f"growth_plan: object with monthly_target (number), weekly_growth_needed (number), "
-                            f"key_tactics (list of 3 tactics to reach {manual_follower_goal or int(manual_followers*1.1):,} followers)\n"
-                            f"ig_connected: false\n"
-                            f"followerCount: {manual_followers}\n"
-                            f"avgEngagementRate: {avg_er}\n"
-                            f"avgReach: {avg_reach}\n"
-                            f"note: string confirming stats are manually entered, not live"
-                            if has_manual else
-                            f"Generate a strategic Instagram brand baseline JSON with keys:\n"
-                            f"brand_strengths: list of 3-4 brand strengths from a social media perspective\n"
-                            f"content_opportunities: list of 3-4 specific content opportunities for {niche}\n"
-                            f"audience_insights: object with pain_points (list), motivations (list), content_preferences (list)\n"
-                            f"benchmark_metrics: object with industry_avg_engagement (string), "
-                            f"typical_follower_growth_monthly (string), best_content_type (string)\n"
-                            f"content_recommendations: list of 4-5 specific actionable content recommendations\n"
-                            f"ig_connected: false\n"
-                            f"followerCount: 0\n"
-                            f"note: string explaining this is a strategic baseline (no IG connected)"
-                        )
+                        f"FULL BRAND BRIEF:\n{context_block[:1500] if context_block else f'Brand: {name} | Niche: {niche} | Audience: {audience} | Tone: {tone}'}\n\n"
+                        f"Produce a strategic launch/growth analysis as JSON. NO placeholder metrics — focus on strategy.\n"
+                        f"Required keys:\n"
+                        f"brand_strengths: 4-5 specific strengths derived from the brand brief above (not generic)\n"
+                        f"content_opportunities: 5 specific {niche} content angles only {name} can credibly own\n"
+                        f"audience_insights: object with pain_points (list of 4 SPECIFIC pains for {audience or niche+' audience'}), "
+                        f"motivations (list of 4 specific drivers), content_preferences (list of 4 format/topic preferences)\n"
+                        f"benchmark_metrics: object with industry_avg_engagement (string like '1-3%'), "
+                        f"typical_follower_growth_monthly (string), best_content_type (string), "
+                        f"reasonable_first_90day_followers (string — realistic for a new {niche} account)\n"
+                        f"content_recommendations: 5 deep, specific recommendations citing the brand's positioning\n"
+                        f"launch_roadmap: object with week_1 (string), week_2_4 (string), month_2_3 (string) — each a specific tactic\n"
+                        f"kpi_targets_90day: object with followers (number), avg_engagement_rate (number, decimal %), reels_per_week (number), saves_per_post (number)\n"
+                        f"ig_connected: false\n"
+                        f"followerCount: 0\n"
+                        f"note: 'No Instagram account connected. Strategic launch plan generated from brand brief. Connect Instagram for live analytics.'"
                     ),
                 },
             ],
             response_format={"type": "json_object"},
             temperature=0.4,
+            max_tokens=2500,
         )
         result = json.loads(resp.choices[0].message.content)
-        # Always override followerCount with our actual value so downstream agents get correct numbers
-        if has_manual:
-            result["followerCount"]     = manual_followers
-            result["avgEngagementRate"] = avg_er
-            result["avgReach"]          = avg_reach
-            result["ig_connected"]      = False
+        result["ig_connected"] = False
+        # Don't carry fake metrics — keep these explicitly null for downstream agents
+        result["followerCount"]     = 0
+        result["avgEngagementRate"] = 0
+        result["avgReach"]          = 0
+        result["topPosts"]          = []
         return result
     except Exception as e:
         print(f"[Analyst] GPT baseline error: {e}")
-        return _fallback_report(name, niche, manual_followers)
+        return _fallback_report(name, niche)
 
 
-def _fallback_report(name: str, niche: str, manual_followers: int = 0) -> dict:
+def _fallback_report(name: str, niche: str) -> dict:
     return {
         "brand_strengths": [
             "Clear niche positioning",
@@ -422,9 +368,6 @@ def _fallback_report(name: str, niche: str, manual_followers: int = 0) -> dict:
             "Repurpose long-form content into bite-sized posts",
         ],
         "ig_connected": False,
-        "followerCount": manual_followers,
-        "note": (
-            f"Manual stats: {manual_followers:,} followers" if manual_followers
-            else "Strategic baseline — connect Instagram or enter stats manually in Brand Hub"
-        ),
+        "followerCount": 0,
+        "note": "Strategic baseline — connect Instagram in Brand Hub for live analytics",
     }
