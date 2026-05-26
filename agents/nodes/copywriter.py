@@ -194,21 +194,31 @@ async def _write_batch(
     )
 
     user_prompt = (
-        f"Write Instagram copy for these {len(batch)} posts.\n\n"
+        f"Write production-grade Instagram content for these {len(batch)} posts.\n\n"
         f"Posts:\n{posts_desc}\n\n"
         f"{hashtag_pool_text}\n\n"
         f"Return JSON with key 'posts' — array of {len(batch)} objects, each with:\n"
         f"  index: 1-based integer\n"
-        f"  hook: the opening 1-2 lines only (the scroll-stopper) — bold, specific, not generic\n"
+        f"  hook: the opening 1-2 lines (scroll-stopper) — bold, specific, niche-grounded\n"
         f"  caption: FULL Instagram caption including hook + body + CTA (150-280 chars, with emojis)\n"
         f"  hashtags: array of 15-20 hashtags (strings with #) — mix broad/niche/brand from the pool\n"
-        f"  visual_brief: 1 sentence on what the visual/creative should look like for this post\n\n"
+        f"  visual_brief: 1 sentence describing the visual/creative direction\n"
+        f"  reel_script: object (set null for non-Reel posts) with keys:\n"
+        f"    duration_seconds (15-45 number),\n"
+        f"    shots (array of 4-7 objects with: time_range like '0-2s', visual, on_screen_text, voiceover),\n"
+        f"    pattern_interrupt (the second 3-5 surprise moment),\n"
+        f"    retention_loop (reason viewer rewatches),\n"
+        f"    cta_overlay (final on-screen CTA text)\n"
+        f"  emotional_trigger: 1-3 word label (curiosity / FOMO / aspiration / relatable-pain / status / fear)\n"
+        f"  conversion_angle: 1 sentence on the action this drives (follow / save / DM / link click) and why\n\n"
         f"Critical rules:\n"
         f"- Every caption must sound like {name} wrote it — specific to their voice and audience\n"
-        f"- Each hook must be DIFFERENT — vary the format (question, statement, number, story)\n"
-        f"- Reference the specific topic in every caption — no generic copy that could fit any brand\n"
-        f"- The {niche} context must be evident in every post\n"
-        f"- Tone must be consistently {tone} throughout"
+        f"- Each hook must be DIFFERENT — vary format (question / statement / number / story / contrarian)\n"
+        f"- Reference the specific topic in every caption — NO generic copy\n"
+        f"- {niche} context must be evident in every post\n"
+        f"- Tone consistently {tone}\n"
+        f"- For Reels: shot 1 must be a CONCRETE first-2-second hook visual, not 'show product'\n"
+        f"- No AI clichés, no LinkedIn preamble, no '✨ unlock the secret ✨' fluff"
     )
 
     resp = await oai.chat.completions.create(
@@ -219,7 +229,7 @@ async def _write_batch(
         ],
         response_format={"type": "json_object"},
         temperature=0.75,
-        max_tokens=3500,
+        max_tokens=6000,
     )
 
     raw         = json.loads(resp.choices[0].message.content)
@@ -230,11 +240,14 @@ async def _write_batch(
         gpt = results_raw[i] if i < len(results_raw) else {}
         merged.append({
             **post,
-            "hook":         gpt.get("hook") or "",
-            "caption":      gpt.get("caption") or _simple_caption(post, i),
-            "hashtags":     gpt.get("hashtags") or [],
-            "visual_brief": gpt.get("visual_brief") or post.get("visual_direction") or "",
-            "copy_brief":   post.get("copy_brief") or "",
+            "hook":             gpt.get("hook") or "",
+            "caption":          gpt.get("caption") or _simple_caption(post, i),
+            "hashtags":         gpt.get("hashtags") or [],
+            "visual_brief":     gpt.get("visual_brief") or post.get("visual_direction") or "",
+            "copy_brief":       post.get("copy_brief") or "",
+            "reel_script":      gpt.get("reel_script") or None,
+            "emotional_trigger":gpt.get("emotional_trigger") or "",
+            "conversion_angle": gpt.get("conversion_angle") or "",
         })
     return merged
 
