@@ -25,7 +25,24 @@ let _bypassRole    = "admin";
 
 async function ensureBypassUser() {
   try {
-    // Prefer the first real user over a dev placeholder
+    // First priority: find the user who actually HAS brands in the DB
+    // This ensures existing brand data is always visible after a redeploy
+    const brandWithUser = await prisma.brand.findFirst({
+      select: { userId: true },
+      orderBy: { createdAt: "asc" },
+    });
+    if (brandWithUser?.userId) {
+      const owner = await prisma.user.findUnique({ where: { id: brandWithUser.userId } });
+      if (owner) {
+        _bypassUserId = owner.id;
+        _bypassEmail  = owner.email;
+        _bypassRole   = owner.role ?? "admin";
+        console.log(`   Bypass auth        →  using brand owner ${owner.email} (${owner.id})`);
+        return;
+      }
+    }
+
+    // Second priority: first real non-dev user
     const existing = await prisma.user.findFirst({
       where: { NOT: { email: "dev@socialos.local" } },
       orderBy: { createdAt: "asc" },
@@ -34,10 +51,11 @@ async function ensureBypassUser() {
       _bypassUserId = existing.id;
       _bypassEmail  = existing.email;
       _bypassRole   = existing.role ?? "admin";
-      console.log(`   Bypass auth        →  using real user ${existing.email} (${existing.id})`);
+      console.log(`   Bypass auth        →  using first real user ${existing.email} (${existing.id})`);
       return;
     }
-    // Fallback: create a dev placeholder if no real user exists yet
+
+    // Fallback: create a dev placeholder if no user exists yet
     const u = await prisma.user.upsert({
       where:  { email: "dev@socialos.local" },
       update: {},
