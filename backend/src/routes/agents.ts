@@ -2,6 +2,19 @@ import type { FastifyInstance } from "fastify";
 import { prisma } from "../lib/prisma";
 import axios from "axios";
 import { z } from "zod";
+import crypto from "crypto";
+
+// ── Token decryption (same algorithm as learningWorker.ts / meta.ts) ──────────
+function decryptToken(encrypted: string): string {
+  const key = Buffer.from(process.env.ENCRYPTION_KEY ?? "", "base64");
+  const buf = Buffer.from(encrypted, "base64");
+  const iv     = buf.subarray(0, 12);
+  const tag    = buf.subarray(12, 28);
+  const cipher = buf.subarray(28);
+  const dec = crypto.createDecipheriv("aes-256-gcm", key, iv);
+  dec.setAuthTag(tag);
+  return Buffer.concat([dec.update(cipher), dec.final()]).toString("utf8");
+}
 
 const AGENTS_URL = process.env.NEXT_PUBLIC_AGENTS_URL ?? "http://localhost:8000";
 
@@ -21,9 +34,60 @@ async function executePipelineRun(runId: string, brandId: string, userId: string
   });
 
   try {
+    // Fetch full brand from Prisma directly — NOT the sanitized API endpoint which strips igAccessToken
+    const brand = await prisma.brand.findUnique({ where: { id: brandId } });
+
+    // Decrypt IG token server-side — only travels over internal Railway network to agents
+    let igAccessToken: string | null = null;
+    if (brand?.igAccessToken) {
+      try { igAccessToken = decryptToken(brand.igAccessToken); }
+      catch { console.warn(`[Pipeline] Could not decrypt token for brand ${brandId}`); }
+    }
+
     const response = await axios.post(
       `${AGENTS_URL}/runs`,
-      { runId, brandId, userId, mode, daysAhead },
+      {
+        runId, brandId, userId, mode, daysAhead,
+        brand: brand ? {
+          id:                brand.id,
+          name:              brand.name,
+          niche:             brand.niche,
+          industry:          (brand as any).industry          ?? "",
+          website:           brand.website                    ?? "",
+          language:          (brand as any).language          ?? "English",
+          positioning:       (brand as any).positioning       ?? "",
+          differentiation:   (brand as any).differentiation   ?? "",
+          brandStory:        (brand as any).brandStory        ?? "",
+          credentials:       (brand as any).credentials       ?? "",
+          targetAudience:    brand.targetAudience             ?? "",
+          audienceAge:       (brand as any).audienceAge       ?? "",
+          audienceProfession:(brand as any).audienceProfession ?? "",
+          audiencePainPoints:(brand as any).audiencePainPoints ?? "",
+          audienceLevel:     (brand as any).audienceLevel     ?? "",
+          audienceLanguage:  (brand as any).audienceLanguage  ?? "",
+          audienceAspirations:(brand as any).audienceAspirations ?? "",
+          tone:              brand.tone                       ?? "Professional",
+          voiceStyle:        (brand as any).voiceStyle        ?? "",
+          catchphrases:      (brand as any).catchphrases      ?? "",
+          forbiddenWords:    (brand as any).forbiddenWords    ?? "",
+          usesSlang:         (brand as any).usesSlang         ?? false,
+          hookStyle:         (brand as any).hookStyle         ?? "",
+          ctaStyle:          (brand as any).ctaStyle          ?? "",
+          hookFormulas:      (brand as any).hookFormulas      ?? "",
+          bestHooks:         (brand as any).bestHooks         ?? "",
+          worstContent:      (brand as any).worstContent      ?? "",
+          contentPillars:    (brand as any).contentPillars    ?? [],
+          competitors:       (brand as any).competitors       ?? [],
+          idealVideoLength:  (brand as any).idealVideoLength  ?? "",
+          instagramUrl:      (brand as any).instagramUrl      ?? "",
+          logoUrl:           (brand as any).logoUrl           ?? "",
+          igAccountId:       brand.igAccountId,
+          igAccessToken,     // decrypted — internal network only, never sent to frontend
+          igUsername:        brand.igUsername,
+          igFollowers:       brand.igFollowers,
+          knowledgeJson:     brand.knowledgeJson,
+        } : null,
+      },
       { timeout: 600_000 }
     );
 

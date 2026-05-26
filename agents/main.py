@@ -47,6 +47,7 @@ class RunRequest(BaseModel):
     userId: str
     mode: str = "full"
     daysAhead: int = 15
+    brand: dict | None = None   # full brand object with decrypted igAccessToken
 
 
 class RelearnRequest(BaseModel):
@@ -76,14 +77,14 @@ async def start_run(req: RunRequest):
     # Create SSE event queue
     event_queue: asyncio.Queue = asyncio.Queue()
 
-    # Build initial state
+    # Build initial state — use brand passed from backend (includes decrypted igAccessToken)
     initial_state: SocialOSState = {
         "run_id": run_id,
         "brand_id": req.brandId,
         "user_id": req.userId,
         "mode": req.mode,
         "days_ahead": req.daysAhead,
-        "brand": None,
+        "brand": req.brand,  # full brand with igAccessToken — set by executePipelineRun
         "brand_knowledge": None,
         "analyst_report": None,
         "research_data": None,
