@@ -143,6 +143,7 @@ model Post {
   topic         String
   caption       String?
   hashtags      String[] @default([])
+  briefJson     Json?    // full copywriter brief: hook_variations, captions, cta, seo_keywords, audio, carousel_slides, story_sequence, posting_time, etc.
   status        String   @default("draft") // draft | approved | scheduled | published | rejected
   scheduledAt   DateTime?  // when to auto-publish (null = not scheduled)
   publishedAt   DateTime?  // when actually published

@@ -108,19 +108,32 @@ async function executePipelineRun(runId: string, brandId: string, userId: string
       },
     });
 
-    // Save posts
+    // Save posts (with full copywriter brief in briefJson)
     if (result.posts?.length) {
       await prisma.post.createMany({
-        data: result.posts.map((p: {
-          date: string; contentType: string; topic: string;
-          caption?: string; hashtags?: string[];
-        }) => ({
+        data: result.posts.map((p: Record<string, any>) => ({
           agentRunId: runId,
           date: new Date(p.date),
           contentType: p.contentType,
           topic: p.topic,
           caption: p.caption,
           hashtags: p.hashtags ?? [],
+          briefJson: {
+            hook:              p.hook              ?? null,
+            hook_variations:   p.hook_variations   ?? [],
+            caption_short:     p.caption_short     ?? null,
+            caption_long:      p.caption_long      ?? null,
+            cta:               p.cta               ?? null,
+            seo_keywords:      p.seo_keywords      ?? [],
+            audio_suggestion:  p.audio_suggestion  ?? null,
+            carousel_slides:   p.carousel_slides   ?? null,
+            story_sequence:    p.story_sequence    ?? null,
+            reel_script:       p.reel_script       ?? null,
+            posting_time:      p.posting_time      ?? null,
+            visual_brief:      p.visual_brief      ?? null,
+            emotional_trigger: p.emotional_trigger ?? null,
+            conversion_angle:  p.conversion_angle  ?? null,
+          },
         })),
       });
     }

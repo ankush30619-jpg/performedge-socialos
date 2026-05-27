@@ -130,7 +130,7 @@ async def copywriter_node(state: SocialOSState, event_queue: asyncio.Queue) -> d
 
     voice_rules.append("")
     voice_rules.append("HASHTAG RULES:")
-    voice_rules.append("- 15-20 hashtags per post")
+    voice_rules.append("- 20-30 hashtags per post")
     voice_rules.append("- Mix: broad reach tags + niche community tags + brand-specific tags")
     voice_rules.append("- NO hashtag spam — all hashtags must be genuinely relevant to the post")
 
@@ -171,6 +171,13 @@ async def copywriter_node(state: SocialOSState, event_queue: asyncio.Queue) -> d
             import traceback; traceback.print_exc()
             posts_with_copy.extend(_fallback_copy(batch, brand))
 
+    # ── Assign posting_time round-robin from growth_strategy.best_times ─────
+    best_times = growth_strategy.get("best_times") or ["7 PM", "8 PM", "9 PM"]
+    if not isinstance(best_times, list) or not best_times:
+        best_times = ["7 PM", "8 PM", "9 PM"]
+    for i, p in enumerate(posts_with_copy):
+        p["posting_time"] = best_times[i % len(best_times)]
+
     return {
         "posts_with_copy":  posts_with_copy,
         "posts_generated":  len(posts_with_copy),
@@ -199,25 +206,42 @@ async def _write_batch(
         f"{hashtag_pool_text}\n\n"
         f"Return JSON with key 'posts' — array of {len(batch)} objects, each with:\n"
         f"  index: 1-based integer\n"
-        f"  hook: the opening 1-2 lines (scroll-stopper) — bold, specific, niche-grounded\n"
-        f"  caption: FULL Instagram caption including hook + body + CTA (150-280 chars, with emojis)\n"
-        f"  hashtags: array of 15-20 hashtags (strings with #) — mix broad/niche/brand from the pool\n"
+        f"  hook_variations: ARRAY of EXACTLY 3 distinct opening hooks — each a different format\n"
+        f"    (e.g. [0]=question, [1]=bold statement, [2]=contrarian/number/story). Each 1-2 lines.\n"
+        f"  caption_short: punchy 80-125 char mobile-first caption (with emojis, no hashtags)\n"
+        f"  caption_long: storytelling 220-400 char caption with hook + value/story + CTA (with emojis)\n"
+        f"  cta: STANDALONE call-to-action, 1 sentence — separate from the caption text\n"
+        f"  seo_keywords: array of 3-5 search keywords (NOT hashtags) for caption SEO\n"
+        f"  hashtags: array of 20-30 hashtags (strings with #) — mix broad/niche/brand from the pool\n"
         f"  visual_brief: 1 sentence describing the visual/creative direction\n"
+        f"  audio_suggestion: object (set null for non-Reel posts) with keys:\n"
+        f"    track_name (trending audio name or 'Original audio'), vibe (1-3 words), why_it_works (1 sentence)\n"
         f"  reel_script: object (set null for non-Reel posts) with keys:\n"
         f"    duration_seconds (15-45 number),\n"
         f"    shots (array of 4-7 objects with: time_range like '0-2s', visual, on_screen_text, voiceover),\n"
         f"    pattern_interrupt (the second 3-5 surprise moment),\n"
         f"    retention_loop (reason viewer rewatches),\n"
         f"    cta_overlay (final on-screen CTA text)\n"
+        f"  carousel_slides: ARRAY (set null for non-Carousel posts) of 5-8 slides, each with:\n"
+        f"    slide_number (1-based), headline (slide title), body (1-2 sentence content),\n"
+        f"    on_slide_text (overlay text), visual_note (what the visual should be).\n"
+        f"    Slide 1 must be the HOOK. Last slide must be the CTA.\n"
+        f"  story_sequence: ARRAY (set null for non-Story posts) of 3-6 frames, each with:\n"
+        f"    frame_number (1-based), type (poll | question | quiz | text | image),\n"
+        f"    text (the frame text), sticker (sticker type or null), cta (the action ask or null)\n"
         f"  emotional_trigger: 1-3 word label (curiosity / FOMO / aspiration / relatable-pain / status / fear)\n"
         f"  conversion_angle: 1 sentence on the action this drives (follow / save / DM / link click) and why\n\n"
         f"Critical rules:\n"
         f"- Every caption must sound like {name} wrote it — specific to their voice and audience\n"
-        f"- Each hook must be DIFFERENT — vary format (question / statement / number / story / contrarian)\n"
+        f"- The 3 hook_variations MUST be DIFFERENT formats — never repeat the same structure\n"
         f"- Reference the specific topic in every caption — NO generic copy\n"
         f"- {niche} context must be evident in every post\n"
         f"- Tone consistently {tone}\n"
         f"- For Reels: shot 1 must be a CONCRETE first-2-second hook visual, not 'show product'\n"
+        f"- For Carousels: slide 1 HOOK must stop the scroll; slides 2 to N-1 deliver value; slide N is CTA\n"
+        f"- For Stories: use poll/question/quiz frames to drive interaction\n"
+        f"- carousel_slides MUST be null for non-Carousel posts; story_sequence MUST be null for non-Story posts\n"
+        f"- audio_suggestion and reel_script MUST be null for non-Reel posts\n"
         f"- No AI clichés, no LinkedIn preamble, no '✨ unlock the secret ✨' fluff"
     )
 
@@ -229,7 +253,7 @@ async def _write_batch(
         ],
         response_format={"type": "json_object"},
         temperature=0.75,
-        max_tokens=6000,
+        max_tokens=10000,
     )
 
     raw         = json.loads(resp.choices[0].message.content)
@@ -238,16 +262,42 @@ async def _write_batch(
     merged = []
     for i, post in enumerate(batch):
         gpt = results_raw[i] if i < len(results_raw) else {}
+        content_type = post.get("contentType", "")
+        is_reel      = content_type in ("Reel", "AI Reel")
+        is_carousel  = content_type == "Carousel"
+        is_story     = content_type == "Story"
+
+        # Normalise hook_variations to exactly 3
+        hook_vars = gpt.get("hook_variations") or []
+        if isinstance(hook_vars, str):
+            hook_vars = [hook_vars]
+        while len(hook_vars) < 3:
+            hook_vars.append(hook_vars[-1] if hook_vars else "")
+        hook_vars = hook_vars[:3]
+
+        caption_long  = gpt.get("caption_long")  or gpt.get("caption") or _simple_caption(post, i)
+        caption_short = gpt.get("caption_short") or (caption_long[:120] if caption_long else "")
+
         merged.append({
             **post,
-            "hook":             gpt.get("hook") or "",
-            "caption":          gpt.get("caption") or _simple_caption(post, i),
+            # Legacy / backward-compatible fields
+            "hook":             hook_vars[0] if hook_vars else (gpt.get("hook") or ""),
+            "caption":          caption_long,
             "hashtags":         gpt.get("hashtags") or [],
             "visual_brief":     gpt.get("visual_brief") or post.get("visual_direction") or "",
             "copy_brief":       post.get("copy_brief") or "",
-            "reel_script":      gpt.get("reel_script") or None,
+            "reel_script":      gpt.get("reel_script") if is_reel else None,
             "emotional_trigger":gpt.get("emotional_trigger") or "",
             "conversion_angle": gpt.get("conversion_angle") or "",
+            # New PRD FR-050 fields
+            "hook_variations":  hook_vars,
+            "caption_short":    caption_short,
+            "caption_long":     caption_long,
+            "cta":              gpt.get("cta") or "",
+            "seo_keywords":     gpt.get("seo_keywords") or [],
+            "audio_suggestion": gpt.get("audio_suggestion") if is_reel else None,
+            "carousel_slides":  gpt.get("carousel_slides") if is_carousel else None,
+            "story_sequence":   gpt.get("story_sequence")  if is_story    else None,
         })
     return merged
 
@@ -261,12 +311,26 @@ def _fallback_copy(posts: list, brand: dict) -> list:
 
     result = []
     for i, p in enumerate(posts):
+        cap = _simple_caption(p, i, name, catchphrases, cta_style)
+        hook = f"Here's something important about {niche}:"
         result.append({
             **p,
-            "hook":         f"Here's something important about {niche}:",
-            "caption":      _simple_caption(p, i, name, catchphrases, cta_style),
-            "hashtags":     _default_hashtags(niche),
-            "visual_brief": "",
+            "hook":             hook,
+            "caption":          cap,
+            "hashtags":         _default_hashtags(niche),
+            "visual_brief":     "",
+            "reel_script":      None,
+            "emotional_trigger":"",
+            "conversion_angle": "",
+            # New PRD FR-050 fields (empty fallbacks)
+            "hook_variations":  [hook, hook, hook],
+            "caption_short":    cap[:120],
+            "caption_long":     cap,
+            "cta":              cta_style or "Save this if it helped you!",
+            "seo_keywords":     [],
+            "audio_suggestion": None,
+            "carousel_slides":  None,
+            "story_sequence":   None,
         })
     return result
 

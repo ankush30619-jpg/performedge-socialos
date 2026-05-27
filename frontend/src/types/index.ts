@@ -122,6 +122,61 @@ export interface AgentRun {
 }
 
 // ── Post (Calendar Item) ──────────────────────────
+export interface CarouselSlide {
+  slide_number: number;
+  headline?: string;
+  body?: string;
+  on_slide_text?: string;
+  visual_note?: string;
+}
+
+export interface StoryFrame {
+  frame_number: number;
+  type?: string;
+  text?: string;
+  sticker?: string | null;
+  cta?: string | null;
+}
+
+export interface ReelShot {
+  time_range?: string;
+  visual?: string;
+  on_screen_text?: string;
+  voiceover?: string;
+}
+
+export interface ReelScript {
+  duration_seconds?: number;
+  shots?: ReelShot[];
+  pattern_interrupt?: string;
+  retention_loop?: string;
+  cta_overlay?: string;
+}
+
+export interface AudioSuggestion {
+  track_name?: string;
+  vibe?: string;
+  why_it_works?: string;
+}
+
+// Full copywriter brief (PRD FR-050) persisted on each post
+export interface PostBrief {
+  hook?: string;
+  hook_variations?: string[];
+  caption_short?: string;
+  caption_long?: string;
+  cta?: string;
+  seo_keywords?: string[];
+  audio_suggestion?: AudioSuggestion | null;
+  carousel_slides?: CarouselSlide[] | null;
+  story_sequence?: StoryFrame[] | null;
+  reel_script?: ReelScript | null;
+  posting_time?: string;
+  visual_brief?: string;
+  emotional_trigger?: string;
+  conversion_angle?: string;
+}
+
 export interface Post {
   id: string;
   agentRunId: string;
@@ -130,6 +185,7 @@ export interface Post {
   topic: string;
   caption?: string;
   hashtags?: string[];
+  briefJson?: PostBrief | null;
   status: "draft" | "approved" | "rejected" | "scheduled" | "published";
   scheduledAt?: string;
   publishedAt?: string;

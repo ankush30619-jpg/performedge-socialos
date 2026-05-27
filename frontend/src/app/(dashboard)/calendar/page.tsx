@@ -589,10 +589,26 @@ function PostDetailModal({
 }) {
   const asset = assets.find((a) => a.contentType === post.contentType || a.topic === post.topic);
   const st = STATUS_CONFIG[post.status as keyof typeof STATUS_CONFIG] ?? STATUS_CONFIG.draft;
-  const caption = post.caption ?? post.topic;
-  const fullCaption = caption + (post.hashtags?.length ? "\n\n" + post.hashtags.map((h) => `#${h}`).join(" ") : "");
+  const brief = post.briefJson ?? {};
+  const captionShort = brief.caption_short ?? post.caption ?? post.topic;
+  const captionLong  = brief.caption_long  ?? post.caption ?? post.topic;
+  const hooks        = (brief.hook_variations && brief.hook_variations.length > 0)
+                        ? brief.hook_variations
+                        : (brief.hook ? [brief.hook] : []);
+  const cta          = brief.cta ?? "";
+  const seoKeywords  = brief.seo_keywords ?? [];
+  const audio        = brief.audio_suggestion ?? null;
+  const carouselSlides = brief.carousel_slides ?? null;
+  const storySequence  = brief.story_sequence ?? null;
+  const reelScript     = brief.reel_script ?? null;
+  const postingTime    = brief.posting_time ?? "";
+  const visualBrief    = brief.visual_brief ?? "";
+  const emotionalTrigger = brief.emotional_trigger ?? "";
+
+  const fullCaption = captionLong + (post.hashtags?.length ? "\n\n" + post.hashtags.map((h) => `#${h}`).join(" ") : "");
   const isPublishing = publishingId === post.id;
 
+  const [activeCaptionTab, setActiveCaptionTab] = useState<"short" | "long">("long");
   const [copied, setCopied] = useState(false);
   function copyCaption() {
     navigator.clipboard.writeText(fullCaption);
@@ -644,10 +660,66 @@ function PostDetailModal({
             </div>
           )}
 
-          {/* Caption */}
+          {/* Posting Time + Emotional Trigger meta row */}
+          {(postingTime || emotionalTrigger) && (
+            <div className="flex items-center gap-2 flex-wrap">
+              {postingTime && (
+                <span className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-yellow-500/10 text-yellow-300 border border-yellow-500/20">
+                  <Clock className="w-3 h-3" /> Best time: {postingTime}
+                </span>
+              )}
+              {emotionalTrigger && (
+                <span className="text-[11px] px-2 py-1 rounded-full bg-pink-500/10 text-pink-300 border border-pink-500/20">
+                  ⚡ {emotionalTrigger}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* 3 Hook Variations */}
+          {hooks.length > 0 && (
+            <div>
+              <label className="text-xs text-white/50 font-medium mb-2 block">
+                Hook Variations ({hooks.length})
+              </label>
+              <div className="space-y-2">
+                {hooks.map((h, idx) => (
+                  <div key={idx}
+                    className="p-3 rounded-xl bg-gradient-to-br from-brand/10 to-purple-800/5 border border-brand/20 text-sm text-white/85 leading-relaxed">
+                    <span className="text-[10px] uppercase tracking-wide text-brand-light/70 font-semibold mr-2">Hook {idx + 1}</span>
+                    {h}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Caption — Short / Long tabs */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="text-xs text-white/50 font-medium">Caption</label>
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-white/50 font-medium">Caption</label>
+                <div className="flex gap-1 ml-2">
+                  <button
+                    onClick={() => setActiveCaptionTab("short")}
+                    className={`text-[10px] px-2 py-0.5 rounded-full font-medium transition-all ${
+                      activeCaptionTab === "short"
+                        ? "bg-brand/25 text-brand-light border border-brand/40"
+                        : "bg-white/[0.04] text-white/40 border border-white/[0.08] hover:text-white/70"
+                    }`}>
+                    Short
+                  </button>
+                  <button
+                    onClick={() => setActiveCaptionTab("long")}
+                    className={`text-[10px] px-2 py-0.5 rounded-full font-medium transition-all ${
+                      activeCaptionTab === "long"
+                        ? "bg-brand/25 text-brand-light border border-brand/40"
+                        : "bg-white/[0.04] text-white/40 border border-white/[0.08] hover:text-white/70"
+                    }`}>
+                    Long
+                  </button>
+                </div>
+              </div>
               <button onClick={copyCaption}
                 className="flex items-center gap-1 text-xs text-white/40 hover:text-brand-light transition-colors">
                 <Copy className="w-3 h-3" />
@@ -655,9 +727,140 @@ function PostDetailModal({
               </button>
             </div>
             <div className="p-3 rounded-xl bg-dark-base/60 border border-white/[0.06] text-sm text-white/80 whitespace-pre-wrap leading-relaxed">
-              {caption}
+              {activeCaptionTab === "short" ? captionShort : captionLong}
             </div>
           </div>
+
+          {/* CTA */}
+          {cta && (
+            <div>
+              <label className="text-xs text-white/50 font-medium mb-2 block">Call to Action</label>
+              <div className="p-3 rounded-xl bg-gradient-to-r from-pink-500/15 to-purple-600/15 border border-pink-500/25 text-sm text-pink-100 font-medium">
+                {cta}
+              </div>
+            </div>
+          )}
+
+          {/* Carousel Slide Breakdown */}
+          {carouselSlides && carouselSlides.length > 0 && (
+            <div>
+              <label className="text-xs text-white/50 font-medium mb-2 block">
+                Carousel Breakdown ({carouselSlides.length} slides)
+              </label>
+              <div className="space-y-2">
+                {carouselSlides.map((s) => (
+                  <div key={s.slide_number}
+                    className="p-3 rounded-xl bg-emerald-500/[0.06] border border-emerald-500/20">
+                    <div className="flex items-start gap-2">
+                      <span className="flex-shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500/25 text-emerald-300 text-[11px] font-bold">
+                        {s.slide_number}
+                      </span>
+                      <div className="flex-1 min-w-0 space-y-1">
+                        {s.headline && <p className="text-sm font-semibold text-white/90">{s.headline}</p>}
+                        {s.body && <p className="text-xs text-white/70 leading-relaxed">{s.body}</p>}
+                        {s.on_slide_text && <p className="text-[11px] text-emerald-300/80 italic">On-slide text: "{s.on_slide_text}"</p>}
+                        {s.visual_note && <p className="text-[11px] text-white/40">Visual: {s.visual_note}</p>}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Story Sequence */}
+          {storySequence && storySequence.length > 0 && (
+            <div>
+              <label className="text-xs text-white/50 font-medium mb-2 block">
+                Story Sequence ({storySequence.length} frames)
+              </label>
+              <div className="space-y-2">
+                {storySequence.map((f) => (
+                  <div key={f.frame_number}
+                    className="p-3 rounded-xl bg-orange-500/[0.06] border border-orange-500/20">
+                    <div className="flex items-start gap-2">
+                      <span className="flex-shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full bg-orange-500/25 text-orange-300 text-[11px] font-bold">
+                        {f.frame_number}
+                      </span>
+                      <div className="flex-1 min-w-0 space-y-1">
+                        {f.type && (
+                          <span className="text-[10px] uppercase tracking-wide font-semibold text-orange-300/80">
+                            {f.type}
+                          </span>
+                        )}
+                        {f.text && <p className="text-sm text-white/85 leading-relaxed">{f.text}</p>}
+                        {f.sticker && <p className="text-[11px] text-white/40">Sticker: {f.sticker}</p>}
+                        {f.cta && <p className="text-[11px] text-orange-200 italic">CTA: {f.cta}</p>}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Audio Suggestion (Reel only) */}
+          {audio && (audio.track_name || audio.vibe) && (
+            <div>
+              <label className="text-xs text-white/50 font-medium mb-2 block">Audio / Music</label>
+              <div className="p-3 rounded-xl bg-blue-500/[0.06] border border-blue-500/20 space-y-1">
+                {audio.track_name && <p className="text-sm font-semibold text-blue-200">🎵 {audio.track_name}</p>}
+                {audio.vibe && <p className="text-xs text-white/70">Vibe: {audio.vibe}</p>}
+                {audio.why_it_works && <p className="text-[11px] text-white/50 italic">{audio.why_it_works}</p>}
+              </div>
+            </div>
+          )}
+
+          {/* Reel Script */}
+          {reelScript && reelScript.shots && reelScript.shots.length > 0 && (
+            <div>
+              <label className="text-xs text-white/50 font-medium mb-2 block">
+                Reel Script {reelScript.duration_seconds ? `(${reelScript.duration_seconds}s)` : ""}
+              </label>
+              <div className="space-y-2">
+                {reelScript.shots.map((shot, idx) => (
+                  <div key={idx} className="p-3 rounded-xl bg-blue-500/[0.05] border border-blue-500/15">
+                    <div className="flex items-start gap-2">
+                      <span className="text-[10px] font-mono font-bold text-blue-300 bg-blue-500/20 px-1.5 py-0.5 rounded">
+                        {shot.time_range ?? `Shot ${idx + 1}`}
+                      </span>
+                      <div className="flex-1 space-y-1">
+                        {shot.visual && <p className="text-xs text-white/80">📹 {shot.visual}</p>}
+                        {shot.on_screen_text && <p className="text-[11px] text-blue-200 italic">OST: {shot.on_screen_text}</p>}
+                        {shot.voiceover && <p className="text-[11px] text-white/50">🎙 {shot.voiceover}</p>}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {reelScript.cta_overlay && (
+                  <p className="text-[11px] text-pink-300/80 italic px-1">Final CTA overlay: {reelScript.cta_overlay}</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* SEO Keywords */}
+          {seoKeywords.length > 0 && (
+            <div>
+              <label className="text-xs text-white/50 font-medium mb-2 block">SEO Keywords</label>
+              <div className="flex flex-wrap gap-1.5">
+                {seoKeywords.map((kw, idx) => (
+                  <span key={idx}
+                    className="text-[11px] px-2 py-0.5 rounded-md bg-white/[0.05] text-white/60 border border-white/[0.08]">
+                    {kw}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Visual Brief */}
+          {visualBrief && (
+            <div>
+              <label className="text-xs text-white/50 font-medium mb-1 block">Visual Brief</label>
+              <p className="text-xs text-white/55 italic leading-relaxed">{visualBrief}</p>
+            </div>
+          )}
 
           {/* Hashtags */}
           {post.hashtags && post.hashtags.length > 0 && (
