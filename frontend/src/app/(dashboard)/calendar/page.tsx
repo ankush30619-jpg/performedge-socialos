@@ -600,6 +600,7 @@ function PostDetailModal({
   const audio        = brief.audio_suggestion ?? null;
   const carouselSlides = brief.carousel_slides ?? null;
   const storySequence  = brief.story_sequence ?? null;
+  const graphicLayout  = brief.graphic_layout ?? null;
   const reelScript     = brief.reel_script ?? null;
   const postingTime    = brief.posting_time ?? "";
   const visualBrief    = brief.visual_brief ?? "";
@@ -764,6 +765,51 @@ function PostDetailModal({
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* Graphic / Static Layout */}
+          {graphicLayout && (graphicLayout.headline || graphicLayout.body_text) && (
+            <div>
+              <label className="text-xs text-white/50 font-medium mb-2 block">
+                Static Graphic Layout
+              </label>
+              <div className="p-4 rounded-xl bg-gradient-to-br from-purple-500/10 to-violet-700/5 border border-purple-500/25 space-y-3">
+                {graphicLayout.headline && (
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wide text-purple-300/70 font-semibold mb-1">Headline</p>
+                    <p className="text-base font-bold text-white leading-tight">{graphicLayout.headline}</p>
+                  </div>
+                )}
+                {graphicLayout.subheadline && (
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wide text-purple-300/70 font-semibold mb-1">Subheadline</p>
+                    <p className="text-sm text-white/85">{graphicLayout.subheadline}</p>
+                  </div>
+                )}
+                {graphicLayout.body_text && (
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wide text-purple-300/70 font-semibold mb-1">Body</p>
+                    <p className="text-xs text-white/70 leading-relaxed">{graphicLayout.body_text}</p>
+                  </div>
+                )}
+                {graphicLayout.supporting_elements && graphicLayout.supporting_elements.length > 0 && (
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wide text-purple-300/70 font-semibold mb-1">Supporting Elements</p>
+                    <ul className="text-xs text-white/70 space-y-1">
+                      {graphicLayout.supporting_elements.map((el, idx) => (
+                        <li key={idx} className="flex gap-2"><span className="text-purple-300/60">•</span>{el}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {graphicLayout.footer_text && (
+                  <div className="pt-2 border-t border-purple-500/20">
+                    <p className="text-[10px] uppercase tracking-wide text-purple-300/70 font-semibold mb-1">Footer / CTA</p>
+                    <p className="text-xs text-purple-200 italic">{graphicLayout.footer_text}</p>
+                  </div>
+                )}
               </div>
             </div>
           )}

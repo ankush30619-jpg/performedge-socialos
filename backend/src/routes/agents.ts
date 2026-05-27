@@ -128,6 +128,7 @@ async function executePipelineRun(runId: string, brandId: string, userId: string
             audio_suggestion:  p.audio_suggestion  ?? null,
             carousel_slides:   p.carousel_slides   ?? null,
             story_sequence:    p.story_sequence    ?? null,
+            graphic_layout:    p.graphic_layout    ?? null,
             reel_script:       p.reel_script       ?? null,
             posting_time:      p.posting_time      ?? null,
             visual_brief:      p.visual_brief      ?? null,

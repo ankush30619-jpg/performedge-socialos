@@ -271,7 +271,7 @@ async def _build_excel(posts: list, brand: dict, strategy: dict, run_id: str) ->
             "Hook 1", "Hook 2", "Hook 3",
             "Caption (Short)", "Caption (Long)", "CTA",
             "Hashtags", "SEO Keywords", "Audio/Music",
-            "Carousel/Story Breakdown", "Visual Brief", "Status",
+            "Script / Slides / Layout", "Visual Brief", "Status",
         ]
         for col, h in enumerate(headers, 1):
             cell = ws.cell(row=3, column=col, value=h)
@@ -315,32 +315,55 @@ async def _build_excel(posts: list, brand: dict, strategy: dict, run_id: str) ->
                 if audio.get("why_it_works"):
                     audio_str += f"\n({audio['why_it_works']})"
 
-            # Carousel/Story breakdown formatted as multi-line
+            # Per-type breakdown formatted as multi-line:
+            #   Reel/AI Reel  → shot-by-shot script with time codes
+            #   Carousel      → slide-by-slide
+            #   Story         → frame-by-frame
+            #   Graphic       → headline / subheadline / body / footer (static layout)
             breakdown = ""
-            if post.get("carousel_slides"):
-                lines = []
+            if ct == "Graphic" and post.get("graphic_layout") and isinstance(post["graphic_layout"], dict):
+                gl = post["graphic_layout"]
+                lines = ["── STATIC GRAPHIC LAYOUT ──"]
+                if gl.get("headline"):
+                    lines.append(f"HEADLINE: {gl['headline']}")
+                if gl.get("subheadline"):
+                    lines.append(f"SUBHEADLINE: {gl['subheadline']}")
+                if gl.get("body_text"):
+                    lines.append(f"BODY: {gl['body_text']}")
+                supporting = gl.get("supporting_elements") or []
+                if supporting:
+                    lines.append("SUPPORTING:")
+                    for el in supporting:
+                        lines.append(f"  • {el}")
+                if gl.get("footer_text"):
+                    lines.append(f"FOOTER: {gl['footer_text']}")
+                breakdown = "\n".join(lines)
+            elif ct == "Carousel" and post.get("carousel_slides"):
+                lines = ["── CAROUSEL SLIDES ──"]
                 for s in post["carousel_slides"]:
                     n  = s.get("slide_number", "?")
                     hd = s.get("headline", "")
                     bd = s.get("body", "")
                     lines.append(f"Slide {n}: {hd} — {bd}")
                 breakdown = "\n".join(lines)
-            elif post.get("story_sequence"):
-                lines = []
+            elif ct == "Story" and post.get("story_sequence"):
+                lines = ["── STORY SEQUENCE ──"]
                 for f in post["story_sequence"]:
                     n  = f.get("frame_number", "?")
                     tp = f.get("type", "")
                     tx = f.get("text", "")
                     lines.append(f"Frame {n} [{tp}]: {tx}")
                 breakdown = "\n".join(lines)
-            elif post.get("reel_script") and isinstance(post["reel_script"], dict):
-                shots = post["reel_script"].get("shots") or []
-                lines = []
-                for sh in shots:
+            elif ct in ("Reel", "AI Reel") and post.get("reel_script") and isinstance(post["reel_script"], dict):
+                rs = post["reel_script"]
+                lines = [f"── REEL SCRIPT ({rs.get('duration_seconds','?')}s) ──"]
+                for sh in rs.get("shots") or []:
                     tr = sh.get("time_range", "")
                     vs = sh.get("visual", "")
                     ot = sh.get("on_screen_text", "")
                     lines.append(f"{tr}: {vs} | OST: {ot}")
+                if rs.get("cta_overlay"):
+                    lines.append(f"Final CTA: {rs['cta_overlay']}")
                 breakdown = "\n".join(lines)
 
             row_data = [

@@ -159,6 +159,14 @@ export interface AudioSuggestion {
   why_it_works?: string;
 }
 
+export interface GraphicLayout {
+  headline?: string;
+  subheadline?: string;
+  body_text?: string;
+  footer_text?: string;
+  supporting_elements?: string[];
+}
+
 // Full copywriter brief (PRD FR-050) persisted on each post
 export interface PostBrief {
   hook?: string;
@@ -170,6 +178,7 @@ export interface PostBrief {
   audio_suggestion?: AudioSuggestion | null;
   carousel_slides?: CarouselSlide[] | null;
   story_sequence?: StoryFrame[] | null;
+  graphic_layout?: GraphicLayout | null;
   reel_script?: ReelScript | null;
   posting_time?: string;
   visual_brief?: string;

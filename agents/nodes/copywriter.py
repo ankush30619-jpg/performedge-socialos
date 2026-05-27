@@ -229,6 +229,12 @@ async def _write_batch(
         f"  story_sequence: ARRAY (set null for non-Story posts) of 3-6 frames, each with:\n"
         f"    frame_number (1-based), type (poll | question | quiz | text | image),\n"
         f"    text (the frame text), sticker (sticker type or null), cta (the action ask or null)\n"
+        f"  graphic_layout: OBJECT (set null for non-Graphic posts) with keys:\n"
+        f"    headline (bold 4-8 word main statement that hits the scroll-stopper),\n"
+        f"    subheadline (1 line supporting context, 6-12 words),\n"
+        f"    body_text (1-2 sentence body explaining the value or insight),\n"
+        f"    footer_text (small CTA line at bottom, 3-6 words),\n"
+        f"    supporting_elements (array of 2-4 short bullet points or stats to visually support the headline)\n"
         f"  emotional_trigger: 1-3 word label (curiosity / FOMO / aspiration / relatable-pain / status / fear)\n"
         f"  conversion_angle: 1 sentence on the action this drives (follow / save / DM / link click) and why\n\n"
         f"Critical rules:\n"
@@ -240,8 +246,10 @@ async def _write_batch(
         f"- For Reels: shot 1 must be a CONCRETE first-2-second hook visual, not 'show product'\n"
         f"- For Carousels: slide 1 HOOK must stop the scroll; slides 2 to N-1 deliver value; slide N is CTA\n"
         f"- For Stories: use poll/question/quiz frames to drive interaction\n"
+        f"- For Graphics (Static): the graphic_layout headline MUST be the scroll-stopper — short, punchy, niche-specific\n"
         f"- carousel_slides MUST be null for non-Carousel posts; story_sequence MUST be null for non-Story posts\n"
         f"- audio_suggestion and reel_script MUST be null for non-Reel posts\n"
+        f"- graphic_layout MUST be null for non-Graphic posts (i.e. null for Reel/AI Reel/Carousel/Story)\n"
         f"- No AI clichés, no LinkedIn preamble, no '✨ unlock the secret ✨' fluff"
     )
 
@@ -266,6 +274,7 @@ async def _write_batch(
         is_reel      = content_type in ("Reel", "AI Reel")
         is_carousel  = content_type == "Carousel"
         is_story     = content_type == "Story"
+        is_graphic   = content_type == "Graphic"
 
         # Normalise hook_variations to exactly 3
         hook_vars = gpt.get("hook_variations") or []
@@ -298,6 +307,7 @@ async def _write_batch(
             "audio_suggestion": gpt.get("audio_suggestion") if is_reel else None,
             "carousel_slides":  gpt.get("carousel_slides") if is_carousel else None,
             "story_sequence":   gpt.get("story_sequence")  if is_story    else None,
+            "graphic_layout":   gpt.get("graphic_layout")  if is_graphic  else None,
         })
     return merged
 
@@ -331,6 +341,7 @@ def _fallback_copy(posts: list, brand: dict) -> list:
             "audio_suggestion": None,
             "carousel_slides":  None,
             "story_sequence":   None,
+            "graphic_layout":   None,
         })
     return result
 
