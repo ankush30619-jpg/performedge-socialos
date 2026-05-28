@@ -358,13 +358,36 @@ export async function instagramRoutes(app: FastifyInstance) {
       const accountRes = await fetch(
         `${GRAPH_BASE}/${brand.igAccountId}?fields=id,username,followers_count,media_count,biography&access_token=${accessToken}`
       );
-      const account = (await accountRes.json()) as Record<string, unknown>;
+      const account = (await accountRes.json()) as Record<string, unknown> & {
+        error?: { message: string; code?: number; type?: string };
+      };
+
+      // If Meta API returned an error, surface it instead of silently returning empty data
+      if (account.error) {
+        console.warn(`[IG Insights] Meta API error for brand ${brandId}:`, account.error);
+        return reply.send({
+          connected: true,
+          error: true,
+          message: `Meta API error: ${account.error.message}`,
+          username: brand.igUsername,
+          followers: brand.igFollowers,
+          mediaCount: 0,
+          biography: "",
+          avgEngagementRate: 0,
+          postsAnalyzed: 0,
+          totalLikes30d: 0,
+          totalComments30d: 0,
+        });
+      }
 
       // Fetch recent media counts
       const mediaRes = await fetch(
         `${GRAPH_BASE}/${brand.igAccountId}/media?fields=id,like_count,comments_count,timestamp&limit=20&access_token=${accessToken}`
       );
-      const mediaData = (await mediaRes.json()) as { data?: Array<Record<string, unknown>> };
+      const mediaData = (await mediaRes.json()) as {
+        data?: Array<Record<string, unknown>>;
+        error?: { message: string };
+      };
       const posts = mediaData.data ?? [];
 
       const totalLikes = posts.reduce((s: number, p) => s + ((p.like_count as number) ?? 0), 0);
@@ -374,18 +397,27 @@ export async function instagramRoutes(app: FastifyInstance) {
         ? parseFloat((((totalLikes + totalComments) / posts.length / followers) * 100).toFixed(2))
         : 0;
 
+      // Update cached follower count in DB if it changed
+      if (typeof account.followers_count === "number" && account.followers_count !== brand.igFollowers) {
+        await prisma.brand.update({
+          where: { id: brandId },
+          data:  { igFollowers: account.followers_count as number },
+        }).catch(() => {});
+      }
+
       return reply.send({
         connected: true,
-        username: account.username,
-        followers: account.followers_count,
-        mediaCount: account.media_count,
-        biography: account.biography,
+        username: account.username ?? brand.igUsername,
+        followers: account.followers_count ?? brand.igFollowers,
+        mediaCount: account.media_count ?? 0,
+        biography: account.biography ?? "",
         avgEngagementRate: avgEngagement,
         postsAnalyzed: posts.length,
         totalLikes30d: totalLikes,
         totalComments30d: totalComments,
       });
     } catch (err) {
+      console.error(`[IG Insights] Exception for brand ${brandId}:`, err);
       return reply.code(500).send({ message: (err as Error).message });
     }
   });

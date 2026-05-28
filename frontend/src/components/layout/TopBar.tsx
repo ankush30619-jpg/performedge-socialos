@@ -39,8 +39,9 @@ export function TopBar() {
     refetchInterval: 120_000,
   });
 
-  const igConnected  = insights?.igConnected ?? false;
-  const followerCount = insights?.followerCount;
+  // API returns { connected, followers, username, ... } from /api/instagram/insights/:brandId
+  const igConnected   = insights?.connected ?? false;
+  const followerCount = insights?.followers ?? insights?.followerCount;
 
   const unreadCount = notifs.filter(n => !n.read).length;
 
