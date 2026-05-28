@@ -359,15 +359,49 @@ export async function metaRoutes(app: FastifyInstance) {
       if (!brand) return reply.code(404).send({ message: "Brand not found" });
 
       const connected = !!brand.igAccessToken;
-      const expired = brand.igTokenExpiresAt ? brand.igTokenExpiresAt < new Date() : false;
+      const dbExpired = brand.igTokenExpiresAt ? brand.igTokenExpiresAt < new Date() : false;
+
+      // Live-check the token against Meta — DB expiry can be wrong if user pasted
+      // a short-lived token. The real source of truth is Meta itself.
+      let liveValid: boolean | null = null;
+      let liveError: string | null = null;
+      if (connected && brand.igAccessToken && brand.igAccountId) {
+        try {
+          const token = decryptToken(brand.igAccessToken);
+          const r = await fetch(
+            `https://graph.facebook.com/v21.0/${brand.igAccountId}?fields=id&access_token=${token}`
+          );
+          const j = await r.json() as { id?: string; error?: { message: string; code?: number } };
+          if (j.error) {
+            liveValid = false;
+            liveError = j.error.message;
+          } else if (j.id) {
+            liveValid = true;
+          }
+        } catch (e) {
+          liveError = (e as Error).message;
+        }
+      }
+
+      // If live check failed but DB expiry was "valid", correct the DB
+      if (connected && liveValid === false && !dbExpired) {
+        await prisma.brand.update({
+          where: { id: brandId },
+          data: { igTokenExpiresAt: new Date(Date.now() - 1000) },
+        }).catch(() => {});
+      }
+
+      const expired = dbExpired || liveValid === false;
 
       return reply.send({
         connected,
         expired,
-        igUsername: brand.igUsername,
-        igAccountId: brand.igAccountId,
-        igFollowers: brand.igFollowers,
-        expiresAt: brand.igTokenExpiresAt,
+        liveValid,                      // true | false | null (couldn't check)
+        liveError,                      // Meta API error message if liveValid === false
+        igUsername:   brand.igUsername,
+        igAccountId:  brand.igAccountId,
+        igFollowers:  brand.igFollowers,
+        expiresAt:    expired ? new Date() : brand.igTokenExpiresAt,
       });
     }
   );

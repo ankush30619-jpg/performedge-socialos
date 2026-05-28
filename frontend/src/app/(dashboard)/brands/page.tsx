@@ -1271,6 +1271,21 @@ function InstagramConnectStep({
     ? expiryDate.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
     : null;
 
+  // Live token check — the DB expiry can lie if user pasted a short-lived token.
+  // The status endpoint actually calls Meta to verify. liveValid=true|false|null.
+  const { data: liveStatus } = useQuery({
+    queryKey: ["meta-status", brandId],
+    queryFn: () =>
+      brandId
+        ? api.get(`/api/meta/status/${brandId}`).then((r) => r.data)
+        : Promise.resolve(null),
+    enabled: !!brandId && isConnected,
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+  const tokenLiveExpired = liveStatus?.liveValid === false;
+  const liveError        = liveStatus?.liveError as string | undefined;
+
   async function handleTestConnection() {
     if (!tokenInput.trim()) { setConnectError("Page Access Token is required."); return; }
     setLoading(true); setConnectError(""); setTestResult(null);
@@ -1335,24 +1350,40 @@ function InstagramConnectStep({
       </div>
 
       {/* ── Status bar ── */}
-      <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${
-        isConnected
-          ? "bg-green-500/10 border border-green-500/20 text-green-400"
-          : "bg-white/[0.04] border border-white/[0.08] text-white/40"
+      <div className={`flex items-start gap-2 px-3 py-2 rounded-lg text-xs ${
+        !isConnected
+          ? "bg-white/[0.04] border border-white/[0.08] text-white/40"
+          : tokenLiveExpired
+            ? "bg-red-500/10 border border-red-500/30 text-red-300"
+            : "bg-green-500/10 border border-green-500/20 text-green-400"
       }`}>
-        {isConnected
-          ? <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
-          : <Link2 className="w-3.5 h-3.5 flex-shrink-0 text-white/30" />
+        {!isConnected
+          ? <Link2 className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-white/30" />
+          : tokenLiveExpired
+            ? <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-red-400" />
+            : <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
         }
-        <span className="font-medium">Status:</span>
-        {isConnected ? (
-          <span>
-            Connected to <span className="font-semibold">@{igUsername}</span>
-            {expiryStr && <span className="text-green-400/60"> — Token expires: {expiryStr}</span>}
-          </span>
-        ) : (
-          <span>Not connected</span>
-        )}
+        <div className="flex-1 min-w-0">
+          <span className="font-medium">Status: </span>
+          {!isConnected && <span>Not connected</span>}
+          {isConnected && tokenLiveExpired && (
+            <>
+              <span className="font-semibold text-red-200">Token EXPIRED</span>
+              <span className="text-red-300/80"> — paste a fresh token below to reconnect.</span>
+              {liveError && (
+                <div className="mt-1 text-[10px] text-red-300/60 font-mono leading-snug">
+                  Meta says: {liveError}
+                </div>
+              )}
+            </>
+          )}
+          {isConnected && !tokenLiveExpired && (
+            <span>
+              Connected to <span className="font-semibold">@{igUsername}</span>
+              {expiryStr && <span className="text-green-400/60"> — Token expires: {expiryStr}</span>}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* ── Guide toggle + Meta Dev console link ── */}
