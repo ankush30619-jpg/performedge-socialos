@@ -124,6 +124,45 @@ export function startLearningWorker() {
           }
 
           console.log(`[LearningWorker] Brand ${id} re-learned: ${summary}`);
+
+          // ── 15-day auto Performance Report ────────────────────────────────
+          // After a successful relearn, automatically enqueue a fresh
+          // growth_planner pipeline so a new PPT (vN+1) lands in the Files
+          // panel. The new PPT carries up-to-date Meta metrics and a refreshed
+          // strategy — easy to compare side-by-side with previous versions.
+          //
+          // Only triggered for cron runs (not manual relearns) to avoid
+          // generating an extra PPT every time someone clicks "Relearn".
+          if (trigger === "cron_15d") {
+            try {
+              const run = await prisma.agentRun.create({
+                data: {
+                  brandId:   id,
+                  userId:    brand.userId,
+                  mode:      "performance_report",
+                  daysAhead: 15,
+                  status:    "pending",
+                  agentStatuses: {},
+                },
+              });
+              // Reuse the agent pipeline queue (same code path as a manual run)
+              const { agentQueue } = await import("../lib/queues");
+              await agentQueue.add(
+                "performance-report",
+                {
+                  runId:     run.id,
+                  brandId:   id,
+                  userId:    brand.userId,
+                  mode:      "growth_planner_only", // reuse the growth-planner-only mode
+                  daysAhead: 15,
+                },
+                { jobId: run.id, removeOnComplete: 50, removeOnFail: 50 }
+              );
+              console.log(`[LearningWorker] Brand ${id} — performance report queued (run ${run.id})`);
+            } catch (e) {
+              console.warn(`[LearningWorker] Could not queue performance report for brand ${id}:`, (e as Error).message);
+            }
+          }
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Unknown error";
           console.error(`[LearningWorker] Brand ${id} re-learn failed:`, msg);

@@ -13,7 +13,7 @@ import {
   Layers, Play, TrendingUp, FileText, ArrowRight, Sparkles,
   Instagram, Users, Heart, MessageCircle, BarChart2, Calendar,
   CheckCircle2, Clock, AlertCircle, Zap, CalendarClock,
-  Brain, Paintbrush,
+  Brain, Paintbrush, Download,
 } from "lucide-react";
 import Link from "next/link";
 import type { Brand } from "@/types";
@@ -272,6 +272,9 @@ export default function DashboardPage() {
             )}
           </GlassCard>
 
+          {/* Generated Files — all PPT/Excel from every team member's runs */}
+          <GeneratedFilesPanel runs={runs} />
+
           {/* Instagram Live Stats (when connected) */}
           {igData.connected && (
             <GlassCard className="p-5">
@@ -421,5 +424,122 @@ export default function DashboardPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// ── Generated Files Panel ─────────────────────────────────────────────────────
+// Shows every PPT + Excel produced by ANY team member's runs for this brand,
+// ordered newest → oldest with v1/v2/v3 version numbering (oldest = v1).
+// Solves the "boss can't see my files" problem because /api/agents/runs is
+// brand-scoped, not user-scoped.
+
+type RunLike = {
+  id: string;
+  createdAt: string;
+  mode?: string;
+  pptUrl?: string;
+  excelUrl?: string;
+  userId?: string;
+};
+
+function GeneratedFilesPanel({ runs }: { runs: RunLike[] }) {
+  // Build a list of file entries: one per pptUrl + one per excelUrl that exist.
+  // Version number is assigned within (mode + kind) — so growth_planner pptUrl
+  // history is v1, v2, v3...; full pipeline pptUrl is its own v1, v2...; same for Excel.
+  type FileEntry = {
+    runId: string;
+    url: string;
+    kind: "ppt" | "excel";
+    mode: string;
+    createdAt: string;
+    version: number;
+  };
+
+  const entries: FileEntry[] = [];
+  // Oldest → newest so version numbers increase chronologically (v1 = first)
+  const oldestFirst = [...runs].sort((a, b) =>
+    new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  );
+  const counters: Record<string, number> = {};
+  for (const r of oldestFirst) {
+    const mode = r.mode ?? "pipeline";
+    if (r.pptUrl) {
+      const key = `${mode}|ppt`;
+      counters[key] = (counters[key] ?? 0) + 1;
+      entries.push({ runId: r.id, url: r.pptUrl, kind: "ppt", mode, createdAt: r.createdAt, version: counters[key] });
+    }
+    if (r.excelUrl) {
+      const key = `${mode}|excel`;
+      counters[key] = (counters[key] ?? 0) + 1;
+      entries.push({ runId: r.id, url: r.excelUrl, kind: "excel", mode, createdAt: r.createdAt, version: counters[key] });
+    }
+  }
+  // Show newest first in the UI
+  entries.reverse();
+
+  const modeLabel = (m: string) =>
+    m === "growth_planner_only" ? "Growth Planner" :
+    m === "performance_report"  ? "Performance Report" :
+    m === "full_pipeline"       ? "Full Pipeline" :
+    m.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+  const kindColor = (k: "ppt" | "excel") =>
+    k === "ppt"
+      ? { bg: "bg-purple-500/10", border: "border-purple-500/25", text: "text-purple-300", icon: "text-purple-400", label: "PPT" }
+      : { bg: "bg-emerald-500/10", border: "border-emerald-500/25", text: "text-emerald-300", icon: "text-emerald-400", label: "XLSX" };
+
+  return (
+    <GlassCard className="p-5">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <FileText className="w-4 h-4 text-brand-light" />
+          <h2 className="font-semibold text-white text-sm">Generated Files</h2>
+          {entries.length > 0 && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/[0.06] text-white/50">{entries.length} files · shared across team</span>
+          )}
+        </div>
+      </div>
+
+      {entries.length === 0 ? (
+        <div className="py-8 text-center">
+          <FileText className="w-8 h-8 text-white/20 mx-auto mb-2" />
+          <p className="text-sm text-white/40">No files generated yet</p>
+          <p className="text-xs text-white/30 mt-1">Run a pipeline to generate PPT &amp; Excel reports</p>
+        </div>
+      ) : (
+        <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
+          {entries.map((e) => {
+            const c = kindColor(e.kind);
+            const date = new Date(e.createdAt);
+            const dateStr = date.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+            const timeStr = date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+            return (
+              <a
+                key={`${e.runId}-${e.kind}`}
+                href={e.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`flex items-center gap-3 p-3 rounded-xl ${c.bg} border ${c.border} hover:bg-white/[0.04] transition-all group`}
+              >
+                <div className={`flex-shrink-0 w-9 h-9 rounded-lg bg-dark-base/40 flex items-center justify-center ${c.icon}`}>
+                  <FileText className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`text-sm font-semibold ${c.text}`}>{modeLabel(e.mode)}</span>
+                    <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${c.bg} ${c.text} border ${c.border}`}>
+                      v{e.version}
+                    </span>
+                    <span className={`text-[10px] font-bold ${c.icon}`}>{c.label}</span>
+                  </div>
+                  <p className="text-[11px] text-white/40 mt-0.5">{dateStr} · {timeStr}</p>
+                </div>
+                <Download className="w-4 h-4 text-white/30 group-hover:text-white/70 transition-colors" />
+              </a>
+            );
+          })}
+        </div>
+      )}
+    </GlassCard>
   );
 }

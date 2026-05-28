@@ -231,29 +231,46 @@ export async function agentRoutes(app: FastifyInstance) {
   });
 
   // GET /api/agents/runs/:runId — poll run status
+  // Visibility scoped by brand ownership (not run owner), so a run created by
+  // any user shows to everyone who can see the brand.
   app.get("/api/agents/runs/:runId", auth, async (req, reply) => {
-    const user = req.user as { id: string };
+    const user = req.user as { id: string; bypass?: boolean };
     const { runId } = req.params as { runId: string };
 
-    const run = await prisma.agentRun.findFirst({
-      where: { id: runId, userId: user.id },
-      include: { posts: true, designAssets: true },
+    const run = await prisma.agentRun.findUnique({
+      where: { id: runId },
+      include: { posts: true, designAssets: true, brand: { select: { userId: true } } },
     });
     if (!run) return reply.code(404).send({ message: "Run not found" });
+    if (!user.bypass && run.brand.userId !== user.id) {
+      return reply.code(404).send({ message: "Run not found" });
+    }
 
     return reply.send({ run });
   });
 
   // GET /api/agents/runs?brandId=xxx — list runs for a brand
+  // Scoped by brand (not user) so all team members see the same history
+  // when working on a shared brand. Visibility = brand ownership, not run-owner.
   app.get("/api/agents/runs", auth, async (req, reply) => {
-    const user = req.user as { id: string };
+    const user = req.user as { id: string; bypass?: boolean };
     const { brandId } = req.query as { brandId?: string };
 
+    // If a brandId is given, verify the user can see this brand, then return ALL runs for it.
+    // If no brandId, fall back to user's own runs (legacy behaviour for dashboard widgets).
+    let whereClause: { brandId?: string; userId?: string };
+    if (brandId) {
+      const brand = await prisma.brand.findFirst({
+        where: user.bypass ? { id: brandId } : { id: brandId, userId: user.id },
+      });
+      if (!brand) return reply.code(404).send({ message: "Brand not found" });
+      whereClause = { brandId };
+    } else {
+      whereClause = { userId: user.id };
+    }
+
     const runs = await prisma.agentRun.findMany({
-      where: {
-        userId: user.id,
-        ...(brandId ? { brandId } : {}),
-      },
+      where: whereClause,
       orderBy: { createdAt: "desc" },
       take: 20,
       include: {
