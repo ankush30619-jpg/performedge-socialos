@@ -8,7 +8,7 @@ import { MetricCard } from "@/components/ui/MetricCard";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { AgentNode } from "@/components/ui/AgentNode";
 import { ProgressBar } from "@/components/ui/ProgressBar";
-import { formatRelativeTime } from "@/lib/utils";
+import { formatRelativeTime, AGENT_LABELS, AGENT_ICONS, AGENT_DESCRIPTIONS, AGENT_PRODUCES } from "@/lib/utils";
 import {
   Layers, Play, TrendingUp, FileText, ArrowRight, Sparkles,
   Instagram, Users, Heart, MessageCircle, BarChart2, Calendar,
@@ -26,6 +26,7 @@ const AGENT_ORDER = [
 export default function DashboardPage() {
   const { setBrands, activeBrandId } = useAppStore();
   const activeBrand = useActiveBrand();
+  const [selectedAgentKey, setSelectedAgentKey] = useState<string | null>(null);
 
   // Load brands
   const { data: brandsData } = useQuery({
@@ -250,6 +251,7 @@ export default function DashboardPage() {
                         agentKey={key}
                         status={(agentData?.status as "pending" | "running" | "completed" | "failed" | "skipped") ?? "pending"}
                         message={agentData?.message}
+                        onClick={() => setSelectedAgentKey(key)}
                       />
                     );
                   })}
@@ -424,6 +426,112 @@ export default function DashboardPage() {
               </div>
             </GlassCard>
           )}
+        </div>
+      </div>
+
+      {/* Agent Detail Modal */}
+      {selectedAgentKey && (
+        <AgentDetailModal
+          agentKey={selectedAgentKey}
+          agentStatuses={agentStatuses}
+          onClose={() => setSelectedAgentKey(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Agent Detail Modal ───────────────────────────────────────────────────────
+// Opens when user clicks any agent card in the pipeline grid.
+// Shows the agent's role description, current status + message, and what it produces.
+
+type AgentStatus = "pending" | "running" | "completed" | "failed" | "skipped";
+
+function AgentDetailModal({
+  agentKey,
+  agentStatuses,
+  onClose,
+}: {
+  agentKey: string;
+  agentStatuses: Record<string, { status?: string; message?: string }>;
+  onClose: () => void;
+}) {
+  const label       = AGENT_LABELS[agentKey] ?? agentKey;
+  const icon        = AGENT_ICONS[agentKey] ?? "🤖";
+  const description = AGENT_DESCRIPTIONS[agentKey] ?? "";
+  const produces    = AGENT_PRODUCES[agentKey] ?? "";
+  const agentData   = agentStatuses[agentKey] as { status?: string; message?: string } | undefined;
+  const status      = (agentData?.status ?? "pending") as AgentStatus;
+  const message     = agentData?.message;
+
+  const STATUS_BG: Record<AgentStatus, string> = {
+    pending:   "bg-white/[0.06] text-white/40",
+    running:   "bg-brand/15 text-brand-light border border-brand/30",
+    completed: "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20",
+    failed:    "bg-red-500/10 text-red-400 border border-red-500/20",
+    skipped:   "bg-white/[0.04] text-white/30",
+  };
+
+  const STATUS_LABEL: Record<AgentStatus, string> = {
+    pending: "Pending",
+    running: "Running",
+    completed: "Completed",
+    failed: "Failed",
+    skipped: "Skipped",
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full max-w-md mx-4 rounded-2xl border border-white/[0.08] bg-[#0f1117] p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start gap-3 mb-5">
+          <span className="text-3xl leading-none mt-0.5">{icon}</span>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-lg font-semibold text-white">{label}</h2>
+            <span className={`inline-block mt-1 text-[11px] font-medium px-2 py-0.5 rounded-full ${STATUS_BG[status]}`}>
+              {STATUS_LABEL[status]}
+            </span>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-white/30 hover:text-white/70 transition text-xl leading-none mt-0.5"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Live status message */}
+        {message && (
+          <div className="mb-4 px-3 py-2.5 rounded-lg bg-white/[0.04] border border-white/[0.06]">
+            <p className="text-xs text-white/60 leading-relaxed">{message}</p>
+          </div>
+        )}
+
+        {/* Role */}
+        <div className="mb-5">
+          <p className="text-[10px] font-semibold text-white/30 uppercase tracking-widest mb-2">What it does</p>
+          <p className="text-sm text-white/65 leading-relaxed">{description}</p>
+        </div>
+
+        {/* Produces */}
+        <div>
+          <p className="text-[10px] font-semibold text-white/30 uppercase tracking-widest mb-2">Produces</p>
+          <div className="flex flex-wrap gap-1.5">
+            {produces.split(" · ").map((item) => (
+              <span
+                key={item}
+                className="text-[11px] px-2.5 py-1 rounded-full bg-brand/10 border border-brand/20 text-brand-light"
+              >
+                {item}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
     </div>

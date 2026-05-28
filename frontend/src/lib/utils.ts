@@ -84,3 +84,25 @@ export const AGENT_ICONS: Record<string, string> = {
   copywriter: "✍️",
   designer: "🎨",
 };
+
+export const AGENT_DESCRIPTIONS: Record<string, string> = {
+  brandManager:      "Loads your brand profile, decrypts the Instagram token, and builds a rich brand-knowledge context block (positioning, voice, content pillars, audience) that every downstream agent uses.",
+  analyst:           "Calls the Meta Graph API for real-time Instagram metrics — followers, engagement rate, top posts — then uses GPT to interpret the numbers into strategic insights and benchmarks.",
+  researchAgent:     "Runs 7 targeted web searches (Tavily + NewsAPI) for your niche, surfaces viral trends and audience pain points, then synthesises findings into brand-specific content angles and 25+ hashtags.",
+  competitorTracker: "Analyses your known competitors plus top niche accounts, maps their content strategy, and identifies the gaps and differentiation angles your brand can own.",
+  growthPlanner:     "Orchestrates Research + Competitor agents in parallel, audits your Instagram post history, builds a month-by-month follower growth roadmap, and generates the strategy PPT + Excel deck.",
+  strategist:        "Creates the 15-day content calendar — one post per day — using the brand brief, content pillars, research trends, and competitor gaps. Each post has a topic, content type, visual direction, and posting time.",
+  copywriter:        "Writes production-ready captions for every post: 3 hook variations, short + long captions, CTA, 20-30 hashtags, SEO keywords, and type-specific content (Reel script / Carousel slides / Story frames / Graphic layout).",
+  designer:          "Generates images via Freepik Mystic AI for Graphic/Reel/Carousel posts, builds the styled 18-column Excel content calendar, and renders the final PowerPoint strategy presentation.",
+};
+
+export const AGENT_PRODUCES: Record<string, string> = {
+  brandManager:      "Brand knowledge context · Decrypted IG token",
+  analyst:           "Follower count · Engagement rate · Top 10 posts · Content opportunities",
+  researchAgent:     "Trending content angles · Audience pain insights · Hashtag clusters · Viral formats",
+  competitorTracker: "Competitor content breakdown · Gaps to fill · Differentiation strategy",
+  growthPlanner:     "Growth roadmap · KPI targets · Content mix % · Strategy PPT · Excel calendar",
+  strategist:        "15-day content calendar · Topic per post · Content type · Visual direction · Posting time",
+  copywriter:        "Hooks · Captions · CTAs · Hashtags · SEO keywords · Scripts · Slides · Layouts",
+  designer:          "AI-generated images · Downloadable Excel calendar · Downloadable PPT deck",
+};

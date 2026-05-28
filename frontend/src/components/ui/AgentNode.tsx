@@ -9,6 +9,7 @@ interface AgentNodeProps {
   status: AgentStatus;
   message?: string;
   className?: string;
+  onClick?: () => void;
 }
 
 const STATUS_CLASSES: Record<AgentStatus, string> = {
@@ -26,16 +27,18 @@ const StatusIcon = ({ status }: { status: AgentStatus }) => {
   return <Clock className="w-3.5 h-3.5 text-white/30" />;
 };
 
-export function AgentNode({ agentKey, status, message, className }: AgentNodeProps) {
+export function AgentNode({ agentKey, status, message, className, onClick }: AgentNodeProps) {
   const label = AGENT_LABELS[agentKey] ?? agentKey;
   const icon = AGENT_ICONS[agentKey] ?? "🤖";
 
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
       <div
+        onClick={onClick}
         className={cn(
           "flex items-center gap-2.5 px-3 py-2.5 rounded-xl border transition-all duration-300",
-          STATUS_CLASSES[status]
+          STATUS_CLASSES[status],
+          onClick && "cursor-pointer hover:brightness-110 hover:scale-[1.02] active:scale-100"
         )}
       >
         <span className="text-base leading-none">{icon}</span>
