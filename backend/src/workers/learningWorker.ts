@@ -153,7 +153,7 @@ export function startLearningWorker() {
                   runId:     run.id,
                   brandId:   id,
                   userId:    brand.userId,
-                  mode:      "growth_planner_only", // reuse the growth-planner-only mode
+                  mode:      "performance_report",
                   daysAhead: 15,
                 },
                 { jobId: run.id, removeOnComplete: 50, removeOnFail: 50 }

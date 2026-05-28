@@ -48,6 +48,10 @@ class RunRequest(BaseModel):
     mode: str = "full"
     daysAhead: int = 15
     brand: dict | None = None   # full brand object with decrypted igAccessToken
+    # Optional inputs used only when mode == "performance_report"
+    previousStrategy: dict | None = None
+    previousAnalystReport: dict | None = None
+    previousPosts: list | None = None
 
 
 class RelearnRequest(BaseModel):
@@ -98,12 +102,38 @@ async def start_run(req: RunRequest):
         "posts_generated": 0,
         "agent_statuses": {},
         "errors": [],
+        # performance_report inputs (None for other modes)
+        "previous_strategy": req.previousStrategy,
+        "previous_analyst_report": req.previousAnalystReport,
+        "previous_posts": req.previousPosts or [],
     }
 
     async def run_pipeline():
         try:
-            pipeline = build_pipeline(event_queue)
-            final_state = await pipeline.ainvoke(initial_state)
+            # Performance report uses a minimal custom pipeline (no langgraph needed):
+            # brand_manager → analyst → performance_reporter
+            if req.mode == "performance_report":
+                from nodes.brand_manager import brand_manager_node
+                from nodes.analyst import analyst_node
+                from nodes.performance_reporter import performance_reporter_node
+
+                state = dict(initial_state)
+                for node_fn, key in [
+                    (brand_manager_node,        "brandManager"),
+                    (analyst_node,              "analyst"),
+                    (performance_reporter_node, "performanceReporter"),
+                ]:
+                    try:
+                        result = await node_fn(state, event_queue)
+                        state.update(result or {})
+                    except Exception as node_err:
+                        print(f"[Pipeline.performance_report] {key} error: {node_err}")
+                        import traceback; traceback.print_exc()
+                        state.setdefault("errors", []).append(f"{key}: {node_err}")
+                final_state = state
+            else:
+                pipeline = build_pipeline(event_queue)
+                final_state = await pipeline.ainvoke(initial_state)
 
             # Signal completion
             await event_queue.put({

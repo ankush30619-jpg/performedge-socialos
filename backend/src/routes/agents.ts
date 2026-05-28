@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "../lib/prisma";
+import { Prisma } from "@prisma/client";
 import axios from "axios";
 import { z } from "zod";
 import crypto from "crypto";
@@ -20,7 +21,7 @@ const AGENTS_URL = process.env.NEXT_PUBLIC_AGENTS_URL ?? "http://localhost:8000"
 
 const runSchema = z.object({
   brandId: z.string(),
-  mode: z.enum(["full", "analyst_only", "strategy_only", "design_only", "growth_planner_only"]).default("full"),
+  mode: z.enum(["full", "analyst_only", "strategy_only", "design_only", "growth_planner_only", "performance_report"]).default("full"),
   daysAhead: z.number().int().min(1).max(30).default(15),
 });
 
@@ -42,6 +43,38 @@ async function executePipelineRun(runId: string, brandId: string, userId: string
     if (brand?.igAccessToken) {
       try { igAccessToken = decryptToken(brand.igAccessToken); }
       catch { console.warn(`[Pipeline] Could not decrypt token for brand ${brandId}`); }
+    }
+
+    // For performance_report mode, also fetch previous strategy + published posts
+    // so the agents service can build planned-vs-actual comparison without an
+    // extra HTTP round trip.
+    let previousStrategy: unknown = null;
+    let previousAnalystReport: unknown = null;
+    let previousPosts: unknown[] = [];
+    if (mode === "performance_report") {
+      const prevRun = await prisma.agentRun.findFirst({
+        where: { brandId, status: "completed", strategyJson: { not: Prisma.JsonNull } },
+        orderBy: { createdAt: "desc" },
+      });
+      previousStrategy      = prevRun?.strategyJson      ?? null;
+      previousAnalystReport = prevRun?.analystReport     ?? null;
+
+      const since = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
+      previousPosts = await prisma.post.findMany({
+        where: {
+          agentRun: { brandId },
+          status:      "published",
+          igMediaId:   { not: null },
+          publishedAt: { gte: since },
+        },
+        orderBy: { publishedAt: "desc" },
+        select: {
+          id: true, date: true, contentType: true, topic: true,
+          caption: true, hashtags: true, briefJson: true,
+          igMediaId: true, publishedAt: true,
+        },
+      });
+      console.log(`[Pipeline] performance_report — found prev run ${prevRun?.id ?? "none"}, ${previousPosts.length} published posts in last 15d`);
     }
 
     const response = await axios.post(
@@ -87,6 +120,10 @@ async function executePipelineRun(runId: string, brandId: string, userId: string
           igFollowers:       brand.igFollowers,
           knowledgeJson:     brand.knowledgeJson,
         } : null,
+        // performance_report mode payload (null for other modes)
+        previousStrategy,
+        previousAnalystReport,
+        previousPosts,
       },
       { timeout: 600_000 }
     );
@@ -247,6 +284,55 @@ export async function agentRoutes(app: FastifyInstance) {
     }
 
     return reply.send({ run });
+  });
+
+  // GET /api/agents/previous-strategy/:brandId
+  // Returns the previous completed run's strategy + all published posts from
+  // the last 15 days (only those with igMediaId so we can fetch Meta insights).
+  // Used by the performance_report mode to drive planned-vs-actual comparison.
+  app.get("/api/agents/previous-strategy/:brandId", auth, async (req, reply) => {
+    const user = req.user as { id: string; bypass?: boolean };
+    const { brandId } = req.params as { brandId: string };
+
+    const brand = await prisma.brand.findFirst({
+      where: user.bypass ? { id: brandId } : { id: brandId, userId: user.id },
+    });
+    if (!brand) return reply.code(404).send({ message: "Brand not found" });
+
+    // Most recent completed run that produced a strategy (any pipeline mode)
+    const prevRun = await prisma.agentRun.findFirst({
+      where: {
+        brandId,
+        status: "completed",
+        strategyJson: { not: Prisma.JsonNull },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    // Published posts in last 15d that have a Meta media ID
+    const since = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
+    const recentPosts = await prisma.post.findMany({
+      where: {
+        agentRun: { brandId },
+        status: "published",
+        igMediaId: { not: null },
+        publishedAt: { gte: since },
+      },
+      orderBy: { publishedAt: "desc" },
+      select: {
+        id: true, date: true, contentType: true, topic: true,
+        caption: true, hashtags: true, briefJson: true,
+        igMediaId: true, publishedAt: true,
+      },
+    });
+
+    return reply.send({
+      previousStrategy: prevRun?.strategyJson ?? null,
+      previousAnalystReport: prevRun?.analystReport ?? null,
+      previousRunId: prevRun?.id ?? null,
+      previousRunAt: prevRun?.createdAt ?? null,
+      posts: recentPosts,
+    });
   });
 
   // GET /api/agents/runs?brandId=xxx — list runs for a brand

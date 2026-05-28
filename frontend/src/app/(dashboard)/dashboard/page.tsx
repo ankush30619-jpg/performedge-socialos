@@ -1,6 +1,6 @@
 "use client";
-import { useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { brandAPI, agentAPI, instagramAPI } from "@/lib/api";
 import { useAppStore, useActiveBrand } from "@/store/useAppStore";
 import { GlassCard } from "@/components/ui/GlassCard";
@@ -153,9 +153,12 @@ export default function DashboardPage() {
             {activeBrand.niche ?? "Brand"} · AI-powered social intelligence
           </p>
         </div>
-        <Link href="/agents" className="btn-primary flex items-center gap-2 text-sm">
-          <Play className="w-4 h-4" /> Run Agents
-        </Link>
+        <div className="flex items-center gap-2">
+          <PerformanceReportButton brandId={activeBrandId} disabled={!activeBrandId} />
+          <Link href="/agents" className="btn-primary flex items-center gap-2 text-sm">
+            <Play className="w-4 h-4" /> Run Agents
+          </Link>
+        </div>
       </div>
 
       {/* Top KPI row */}
@@ -424,6 +427,53 @@ export default function DashboardPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// ── Performance Report Button ────────────────────────────────────────────────
+// Kicks off a one-off `performance_report` pipeline run on demand so the user
+// doesn't have to wait for the 15-day cron to test the comparison PPT.
+
+function PerformanceReportButton({ brandId, disabled }: { brandId: string | null; disabled?: boolean }) {
+  const queryClient = useQueryClient();
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function trigger() {
+    if (!brandId || loading) return;
+    setLoading(true); setMsg(null);
+    try {
+      await agentAPI.run(brandId, { mode: "performance_report", daysAhead: 15 });
+      setMsg("Performance report queued — new PPT will appear in Generated Files shortly.");
+      // Refresh runs so the new file appears
+      queryClient.invalidateQueries({ queryKey: ["runs", brandId] });
+      setTimeout(() => setMsg(null), 6000);
+    } catch (err: unknown) {
+      const m = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setMsg(m ?? "Failed to queue performance report.");
+      setTimeout(() => setMsg(null), 6000);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        onClick={trigger}
+        disabled={disabled || loading}
+        title="Generate a planned vs actual report based on the last 15 days"
+        className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        <Brain className="w-4 h-4" />
+        {loading ? "Queueing…" : "Run Performance Report"}
+      </button>
+      {msg && (
+        <div className="fixed bottom-6 right-6 z-50 max-w-sm px-4 py-3 rounded-xl bg-dark-mid/90 border border-emerald-500/30 text-emerald-200 text-sm shadow-2xl backdrop-blur">
+          {msg}
+        </div>
+      )}
+    </>
   );
 }
 

@@ -74,5 +74,10 @@ class SocialOSState(TypedDict):
     # ── Per-agent status (merged dict, last value per key wins) ──────────────
     agent_statuses: Annotated[dict, _merge_dict]
 
+    # ── Performance report inputs (only set when mode == "performance_report") ─
+    previous_strategy:        Annotated[Optional[dict], _last]
+    previous_analyst_report:  Annotated[Optional[dict], _last]
+    previous_posts:           Annotated[Optional[list], _last]
+
     # ── Error tracking (append-only list) ────────────────────────────────────
     errors: Annotated[list, _append_list]

@@ -81,10 +81,15 @@ export function startScheduleWorker() {
 
       const mediaId = await publishToIG(brand.igAccountId, accessToken, imageUrl, caption);
 
-      // Mark post as published
+      // Mark post as published — persist igMediaId + publishedAt so the
+      // performance comparison report can pull live engagement per post.
       await prisma.post.update({
         where: { id: postId },
-        data: { status: "published" },
+        data: {
+          status:      "published",
+          igMediaId:   mediaId,
+          publishedAt: new Date(),
+        },
       });
 
       console.log(`[ScheduleWorker] Post ${postId} published → Media ID ${mediaId}`);

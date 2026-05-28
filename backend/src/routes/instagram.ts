@@ -186,10 +186,15 @@ export async function instagramRoutes(app: FastifyInstance) {
         containerId
       );
 
-      // Step 4: Update post status in DB
+      // Step 4: Update post status in DB — persist igMediaId + publishedAt so
+      // the performance comparison report can later pull Meta engagement per post.
       await prisma.post.update({
         where: { id: postId },
-        data: { status: "published" },
+        data: {
+          status:      "published",
+          igMediaId:   mediaId,
+          publishedAt: new Date(),
+        },
       });
 
       return reply.send({
@@ -237,7 +242,14 @@ export async function instagramRoutes(app: FastifyInstance) {
       await waitForContainerReady(containerId, accessToken);
       const mediaId = await publishMediaContainer(brand.igAccountId, accessToken, containerId);
 
-      await prisma.post.update({ where: { id: postId }, data: { status: "published" } });
+      await prisma.post.update({
+        where: { id: postId },
+        data: {
+          status:      "published",
+          igMediaId:   mediaId,
+          publishedAt: new Date(),
+        },
+      });
 
       return reply.send({ success: true, mediaId });
     } catch (err) {
