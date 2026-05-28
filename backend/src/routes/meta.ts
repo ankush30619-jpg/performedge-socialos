@@ -263,9 +263,35 @@ export async function metaRoutes(app: FastifyInstance) {
         });
       }
 
+      // Try to exchange short-lived token → long-lived (60-day) token
+      // If user pasted a short-lived token from Graph API Explorer, this saves them from
+      // a same-day expiry. If the token is already long-lived, exchange is idempotent.
+      let finalToken = accessToken;
+      let tokenExpiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000); // assume 60d
+      try {
+        const llRes = await fetch(
+          `https://graph.facebook.com/v21.0/oauth/access_token?` +
+            new URLSearchParams({
+              grant_type:        "fb_exchange_token",
+              client_id:         META_APP_ID,
+              client_secret:     META_APP_SECRET,
+              fb_exchange_token: accessToken,
+            })
+        );
+        const llData = await llRes.json() as { access_token?: string; expires_in?: number; error?: { message: string } };
+        if (llData.access_token) {
+          finalToken     = llData.access_token;
+          tokenExpiresAt = new Date(Date.now() + (llData.expires_in ?? 5184000) * 1000);
+          console.log(`[Meta] Long-lived token exchange OK for brand ${brandId} — expires ${tokenExpiresAt.toISOString()}`);
+        } else if (llData.error) {
+          console.warn(`[Meta] Long-lived exchange failed for brand ${brandId}: ${llData.error.message} — saving original token`);
+        }
+      } catch (e) {
+        console.warn(`[Meta] Long-lived exchange threw for brand ${brandId}:`, (e as Error).message);
+      }
+
       // Encrypt & persist
-      const encrypted      = encryptToken(accessToken);
-      const tokenExpiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000); // 60 days
+      const encrypted = encryptToken(finalToken);
 
       await prisma.brand.update({
         where: { id: brandId },
