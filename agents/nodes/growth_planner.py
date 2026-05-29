@@ -94,12 +94,13 @@ async def growth_planner_node(state: SocialOSState, event_queue: asyncio.Queue) 
         "message": "Auditing Instagram performance — analysing every post…",
     })
 
-    ig_audit = _build_ig_audit(analyst_report, brand, brand_knowledge)
+    ig_audit    = _build_ig_audit(analyst_report, brand, brand_knowledge)
+    feasibility = _calculate_goal_feasibility(ig_audit, days_ahead)
 
     await event_queue.put({
         "type": "agent_progress",
         "agentKey": "growthPlanner",
-        "message": f"Audit complete — {ig_audit['posts_analysed']} posts, ER {ig_audit['avg_er']}%",
+        "message": f"Audit complete — {ig_audit['posts_analysed']} posts, ER {ig_audit['avg_er']}% · Goal feasibility: {feasibility['probability_pct']}%",
     })
 
     # ── Growth Strategy Synthesis ─────────────────────────────────────────────
@@ -111,7 +112,7 @@ async def growth_planner_node(state: SocialOSState, event_queue: asyncio.Queue) 
 
     growth_strategy = await _generate_strategy(
         brand, brand_knowledge, analyst_report,
-        research_data, competitor_data, ig_audit, days_ahead
+        research_data, competitor_data, ig_audit, days_ahead, feasibility
     )
 
     # ── Build PPT for growth_planner_only mode ────────────────────────────────
@@ -126,6 +127,7 @@ async def growth_planner_node(state: SocialOSState, event_queue: asyncio.Queue) 
             brand, ig_audit, growth_strategy,
             research_data, competitor_data, days_ahead, run_id,
             analyst_report=analyst_report,
+            feasibility=feasibility,
         )
         await event_queue.put({
             "type": "agent_progress",
@@ -216,9 +218,52 @@ def _build_ig_audit(analyst_report: dict, brand: dict, brand_knowledge: dict = N
     }
 
 
+# ── Goal Feasibility Calculator ──────────────────────────────────────────────
+
+def _calculate_goal_feasibility(ig_audit: dict, days_ahead: int) -> dict:
+    """Pre-compute goal math in Python so GPT reasons from reliable numbers."""
+    followers    = ig_audit.get("followers", 0)
+    goal         = ig_audit.get("goal_followers", 500)
+    gap          = max(goal - followers, 0)
+    ig_connected = ig_audit.get("ig_connected", False)
+    avg_reach    = ig_audit.get("avg_reach", 0)
+
+    if ig_connected and followers > 0 and avg_reach > 0:
+        est_weekly_growth = max(1, int(avg_reach * 0.02))
+    else:
+        est_weekly_growth = 5  # cold-start baseline
+
+    weeks             = max(1, days_ahead / 7)
+    projected_at_pace = int(est_weekly_growth * weeks)
+    required_weekly   = round(gap / weeks, 1)
+    required_daily    = round(gap / max(1, days_ahead), 1)
+    accel             = round(required_weekly / max(1, est_weekly_growth), 1)
+    probability       = min(95, max(10, int(100 / max(1, accel))))
+
+    risks = []
+    if accel > 5:        risks.append(f"Goal needs {accel}x acceleration — very aggressive for {days_ahead} days")
+    if accel > 2:        risks.append("Requires consistent daily Reels + active engagement every day")
+    if not ig_connected: risks.append("No live IG data — estimates based on brand brief + niche benchmarks")
+    if days_ahead <= 15: risks.append("Short window — first 7 days are make-or-break for momentum")
+
+    return {
+        "current_followers":         followers,
+        "target_followers":          goal,
+        "gap":                       gap,
+        "days_ahead":                days_ahead,
+        "est_current_weekly_growth": est_weekly_growth,
+        "projected_growth_at_pace":  projected_at_pace,
+        "required_weekly_growth":    required_weekly,
+        "required_daily_growth":     required_daily,
+        "acceleration_needed":       accel,
+        "probability_pct":           probability,
+        "risks":                     risks,
+    }
+
+
 # ── GPT Growth Strategy ──────────────────────────────────────────────────────
 
-async def _generate_strategy(brand, brand_knowledge, analyst_report, research_data, competitor_data, ig_audit, days_ahead) -> dict:
+async def _generate_strategy(brand, brand_knowledge, analyst_report, research_data, competitor_data, ig_audit, days_ahead, feasibility: dict = None) -> dict:
     oai = _get_oai()
     if not oai:
         return _fallback_strategy(brand, days_ahead)
@@ -275,19 +320,36 @@ async def _generate_strategy(brand, brand_knowledge, analyst_report, research_da
                 {
                     "role": "system",
                     "content": (
-                        f"You are a senior Instagram growth strategist working exclusively for {name}. "
-                        f"You have deep expertise in {niche} and know this brand inside out. "
-                        f"Create a hyper-specific, data-informed growth strategy that feels tailor-made — "
-                        f"not a generic template. Every recommendation must reference the brand's actual "
-                        f"positioning, voice, and audience.\n\n"
-                        f"{context_block[:600] if context_block else ''}"
+                        f"You are a senior social media growth strategist. You produce consulting-grade, "
+                        f"data-backed growth plans — not templates. Every recommendation MUST reference "
+                        f"{name} and {niche} specifically. Generic advice is unacceptable.\n\n"
+                        f"CRITICAL RULES:\n"
+                        f"1. NEVER assume follower counts. Use ONLY the actual data provided.\n"
+                        f"2. If goal requires >3x acceleration, flag it and provide an urgent bridge plan.\n"
+                        f"3. Produce day_by_day_plan when days_ahead ≤ 21 (one entry per day). "
+                        f"Produce weekly_plan when days_ahead > 21.\n"
+                        f"4. performance_diagnosis must reference actual post data — not generic insights.\n"
+                        f"5. pillar_breakdown must have one entry per content pillar with real performance assessment.\n"
+                        f"6. Every insight must feel like a strategist spent hours on this brand.\n\n"
+                        f"Brand context:\n{context_block[:800] if context_block else ''}"
                     ),
                 },
                 {
                     "role": "user",
                     "content": (
                         f"Build a comprehensive {days_ahead}-day Instagram growth strategy for {name}.\n\n"
-                        f"=== BRAND CONTEXT ===\n"
+                        f"=== GOAL FEASIBILITY (pre-calculated — use these exact numbers) ===\n"
+                        + (
+                            f"Current Followers: {feasibility['current_followers']:,} → Target: {feasibility['target_followers']:,} (Gap: +{feasibility['gap']:,})\n"
+                            f"Est. current weekly growth: {feasibility['est_current_weekly_growth']} followers/week\n"
+                            f"Required weekly growth: {feasibility['required_weekly_growth']} followers/week\n"
+                            f"Required daily growth: {feasibility['required_daily_growth']} followers/day\n"
+                            f"Acceleration needed: {feasibility['acceleration_needed']}x\n"
+                            f"Success probability: {feasibility['probability_pct']}%\n"
+                            f"Key risks: {'; '.join(feasibility['risks']) or 'None identified'}\n\n"
+                            if feasibility else ""
+                        )
+                        + f"=== BRAND CONTEXT ===\n"
                         f"Niche: {niche} | Tone: {tone} | Audience: {audience}\n"
                         + (f"Positioning: {positioning}\n" if positioning else "")
                         + (f"Differentiator: {differentiation}\n" if differentiation else "")
@@ -349,12 +411,30 @@ async def _generate_strategy(brand, brand_knowledge, analyst_report, research_da
                             if not ig_connected else
                             f"kpi_targets_30day: object with target_followers (number), target_er (number), reels_per_week (number)\n"
                         )
+                        + f"\n=== NEW REQUIRED KEYS (must be specific to {name}/{niche}) ===\n"
+                        + f"performance_diagnosis: object with whats_working (list of 3-4 observations from ACTUAL top-post data), "
+                        + f"whats_failing (list of 3-4 from low-post data), missed_opportunities (list of 3-4 gaps), "
+                        + f"bottlenecks (list of 2-3 structural blockers for {name})\n"
+                        + f"pillar_breakdown: list of objects, one per content pillar — each with pillar (string), "
+                        + f"current_performance (high/medium/low), growth_potential (high/medium/low), "
+                        + f"recommended_frequency (e.g. '3x/week'), expected_impact (string, 1 sentence specific to {niche})\n"
+                        + f"goal_strategy: object with narrative (2-3 sentences on HOW the goal will be reached), "
+                        + f"week_by_week_path (list of strings like 'Week 1: focus on Reels, target +{max(1, int((feasibility or {}).get('required_weekly_growth', 10))) if feasibility else 10} followers'), "
+                        + f"non_negotiable_actions (list of 3-5 must-do actions), risk_mitigation (list of 2-3 actions)\n"
+                        + (
+                            f"day_by_day_plan: list of {days_ahead} objects (one per day), each with day (int), "
+                            f"content_task (specific post idea for {name}), growth_task (specific growth action), "
+                            f"engagement_task, community_task, kpi_target (e.g. '+3 followers, 5 comments')\n"
+                            if days_ahead <= 21 else
+                            f"weekly_plan: list of {max(4, days_ahead // 7)} objects, each with week (int), theme (string), "
+                            f"content_tasks (string), growth_tasks (string), kpi_target (string)\n"
+                        )
                     ),
                 },
             ],
             response_format={"type": "json_object"},
             temperature=0.5,
-            max_tokens=2500,
+            max_tokens=4500,
         )
         strategy_out = json.loads(resp.choices[0].message.content)
         # Ensure KPI targets from analyst flow through to the PPT layer
@@ -371,7 +451,7 @@ async def _generate_strategy(brand, brand_knowledge, analyst_report, research_da
 
 # ── Growth Planner PPT ───────────────────────────────────────────────────────
 
-async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor_data, days_ahead, run_id, analyst_report: dict = None) -> str | None:
+async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor_data, days_ahead, run_id, analyst_report: dict = None, feasibility: dict = None) -> str | None:
     try:
         from pptx import Presentation
         from pptx.util import Inches, Pt
@@ -427,6 +507,7 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         ar           = analyst_report or {}
         rd           = research_data or {}
         cd           = competitor_data or {}
+        feas         = feasibility or {}
         grey         = RGBColor(0x9C, 0xA3, 0xAF)
         light        = RGBColor(0xCB, 0xD5, 0xE1)
         mid_dark     = RGBColor(0x12, 0x0D, 0x28)
@@ -446,265 +527,300 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         txt(s, "Prepared by PerformEdge", Inches(0.4), Inches(4.85), Inches(6), Inches(0.3), 11, color=RGBColor(0x6B,0x72,0x80))
         txt(s, month_str, Inches(7.5), Inches(4.85), Inches(2), Inches(0.3), 11, color=RGBColor(0x6B,0x72,0x80), align=PP_ALIGN.RIGHT)
 
-        # ── Slide 2: Executive Summary ──
+        # ── Slide 2: Brand Snapshot ──
         s = prs.slides.add_slide(blank); bg(s, dark)
         bar(s, 0, 0, Inches(10), Inches(0.06), brand_color)
-        txt(s, "01  ·  EXECUTIVE SUMMARY", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
-        txt(s, "Where we are. Where we're going.", Inches(0.4), Inches(0.58), Inches(9), Inches(0.52), 22, bold=True)
-        bar(s, Inches(0.4), Inches(1.22), Inches(4.5), Inches(2.8), mid_dark)
-        txt(s, "CURRENT STATE", Inches(0.55), Inches(1.35), Inches(4), Inches(0.32), 9, color=accent, bold=True)
-        current_text = (f"@{ar.get('username', name.lower().replace(' ',''))} has {followers:,} followers and {avg_er}% avg engagement rate. "
-                        f"Best content type: {ig_audit.get('best_content_type','Reels')}."
-                        if ig_connected else
-                        f"{name} is building its Instagram presence from the ground up. "
-                        f"Strong brand foundation in {niche} with clear audience and positioning.")
-        txt(s, current_text[:240], Inches(0.55), Inches(1.68), Inches(4.1), Inches(1.95), 10, color=light)
-        bar(s, Inches(5.1), Inches(1.22), Inches(4.5), Inches(2.8), mid_dark)
-        txt(s, "OPPORTUNITY", Inches(5.25), Inches(1.35), Inches(4), Inches(0.32), 9, color=green, bold=True)
-        opp_list = ar.get("content_opportunities") or rd.get("trending_angles") or []
-        opp_text = (opp_list[0] if isinstance(opp_list, list) and opp_list else
-                    f"The {niche} category is growing rapidly. Competitors underinvest in educational and community-driven content — "
-                    f"a clear gap {name} can own with consistent, authentic storytelling.")
-        txt(s, str(opp_text)[:240], Inches(5.25), Inches(1.68), Inches(4.1), Inches(1.95), 10, color=light)
-        kpi         = strategy.get("kpi_targets_90day") or {}
-        goal_fol    = int(kpi.get("followers", goal) or goal)
-        target_er   = kpi.get("avg_engagement_rate", "10%+")
-        txt(s, "NORTH STAR METRIC", Inches(0.4), Inches(4.18), Inches(4.0), Inches(0.28), 9, color=grey, bold=True)
-        txt(s, "Engagement Rate", Inches(0.4), Inches(4.46), Inches(4.0), Inches(0.38), 14, bold=True)
-        txt(s, "90-DAY TARGET", Inches(5.1), Inches(4.18), Inches(4.5), Inches(0.28), 9, color=grey, bold=True)
-        txt(s, f"{followers:,} → {goal_fol:,} followers  ·  {avg_er}% → {target_er} ER", Inches(5.1), Inches(4.46), Inches(4.5), Inches(0.38), 13, bold=True, color=green)
+        txt(s, "01  ·  BRAND SNAPSHOT", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
+        txt(s, "Where you stand today.", Inches(0.4), Inches(0.55), Inches(6), Inches(0.5), 20, bold=True)
+        if ig_connected and followers > 0:
+            mode_label = f"Live Instagram data  ·  {ig_audit.get('posts_analysed', 0)} posts analysed"
+        else:
+            mode_label = "Launch Mode  ·  Targets based on brand brief + market research (connect IG for live metrics)"
+        txt(s, mode_label, Inches(0.4), Inches(0.95), Inches(9.2), Inches(0.3), 9, color=grey, italic=True)
+        kpi = ar.get("kpi_targets_90day") if isinstance(ar.get("kpi_targets_90day"), dict) else {}
+        kpi = kpi or {}
+        if ig_connected and followers > 0:
+            snap_stats = [
+                (f"{followers:,}",  "Current Followers",  brand_color),
+                (f"{avg_er}%",      "Avg Engagement Rate", green),
+                (f"{avg_reach:,}",  "Avg Reach / Post",   accent),
+                (ig_audit.get("best_content_type", "Reel"), "Best Format", RGBColor(0xF5,0x9E,0x0B)),
+                (str(ig_audit.get("posts_analysed", 0)), "Posts Analysed", white),
+            ]
+        else:
+            kpi_fol   = int(kpi.get("followers", 500) or 500)
+            kpi_er    = kpi.get("avg_engagement_rate", "3-5")
+            kpi_reels = kpi.get("reels_per_week", 3)
+            snap_stats = [
+                (f"{kpi_fol:,}",    "90-Day Follower Target",  brand_color),
+                (f"{kpi_er}%",      "Target Engagement Rate",  green),
+                (f"{kpi_reels}/wk", "Reels Cadence",           accent),
+                (f"{feas.get('probability_pct', 70)}%", "Goal Probability", RGBColor(0xF5,0x9E,0x0B)),
+                ("Launch Phase",    "Account Status",          white),
+            ]
+        for i, (val, label, col) in enumerate(snap_stats):
+            x = Inches(0.3 + i * 1.9)
+            bar(s, x, Inches(1.35), Inches(1.8), Inches(2.0), mid_dark)
+            bar(s, x, Inches(1.35), Inches(1.8), Inches(0.05), col)
+            txt(s, str(val), x + Inches(0.12), Inches(1.52), Inches(1.58), Inches(0.75), 20, bold=True, color=col, align=PP_ALIGN.CENTER)
+            txt(s, label, x + Inches(0.05), Inches(2.27), Inches(1.7), Inches(0.35), 9, color=grey, align=PP_ALIGN.CENTER)
+        audience     = brand.get("targetAudience", "") or ""
+        pillar_list  = brand.get("contentPillars") or []
+        bar(s, Inches(0.3), Inches(3.65), Inches(4.6), Inches(1.45), mid_dark)
+        txt(s, "TARGET AUDIENCE", Inches(0.45), Inches(3.72), Inches(4.2), Inches(0.3), 8, color=accent, bold=True)
+        txt(s, str(audience)[:200] or "See brand brief", Inches(0.45), Inches(4.0), Inches(4.3), Inches(0.9), 10, color=light)
+        bar(s, Inches(5.1), Inches(3.65), Inches(4.6), Inches(1.45), mid_dark)
+        txt(s, "CONTENT PILLARS", Inches(5.25), Inches(3.72), Inches(4.2), Inches(0.3), 8, color=brand_color, bold=True)
+        pillars_text = "  ·  ".join(str(p)[:28] for p in pillar_list[:4]) if pillar_list else "See strategy below"
+        txt(s, pillars_text, Inches(5.25), Inches(4.0), Inches(4.3), Inches(0.9), 10, color=light)
         footer(s, 2)
 
-        # ── Slide 3: Current Social State ──
+        # ── Slide 3: Performance Diagnosis ──
         s = prs.slides.add_slide(blank); bg(s, dark)
         bar(s, 0, 0, Inches(10), Inches(0.06), brand_color)
-        txt(s, "02  ·  CURRENT SOCIAL STATE", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
-        txt(s, "Where the brand stands today.", Inches(0.4), Inches(0.58), Inches(9), Inches(0.5), 20, bold=True)
-        stats_row = [
-            (f"{followers:,}",                  "Followers",     brand_color),
-            (f"{avg_er}%",                       "Avg ER",        green),
-            (f"{avg_reach:,}",                   "Avg Reach",     accent),
-            (f"{ig_audit.get('posts_analysed',0)}", "Posts Analysed", RGBColor(0xF5,0x9E,0x0B)),
+        txt(s, "02  ·  PERFORMANCE DIAGNOSIS", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
+        txt(s, "What the data is telling us.", Inches(0.4), Inches(0.55), Inches(9), Inches(0.5), 20, bold=True)
+        diag = strategy.get("performance_diagnosis") or {}
+        sections_3 = [
+            ("WHAT'S WORKING",        green,                      diag.get("whats_working")       or strategy.get("what_works")   or ["Top posts show strong ER"],        Inches(0.3),  Inches(1.15)),
+            ("WHAT'S FAILING",        red,                        diag.get("whats_failing")       or strategy.get("what_to_stop") or ["Low-engagement formats"],           Inches(5.1),  Inches(1.15)),
+            ("MISSED OPPORTUNITIES",  RGBColor(0xF5,0x9E,0x0B),  diag.get("missed_opportunities") or ["Untapped trending formats"], Inches(0.3),  Inches(3.15)),
+            ("BOTTLENECKS",           accent,                     diag.get("bottlenecks")          or ["Posting frequency inconsistency"], Inches(5.1),  Inches(3.15)),
         ]
-        for i, (val, lbl, col) in enumerate(stats_row):
-            x = Inches(0.35 + i * 2.42)
-            bar(s, x, Inches(1.3), Inches(2.15), Inches(1.1), RGBColor(0x1E,0x16,0x40))
-            txt(s, val, x, Inches(1.35), Inches(2.15), Inches(0.65), 22, bold=True, color=col, align=PP_ALIGN.CENTER)
-            txt(s, lbl, x, Inches(1.95), Inches(2.15), Inches(0.32), 9, color=grey, align=PP_ALIGN.CENTER)
-        bar(s, Inches(0.4), Inches(2.55), Inches(4.45), Inches(2.2), RGBColor(0x0D,0x2E,0x1F))
-        txt(s, "WHAT'S WORKING", Inches(0.55), Inches(2.65), Inches(4), Inches(0.3), 9, color=green, bold=True)
-        w_items = strategy.get("what_works") or []
-        w_text  = "\n".join(f"• {w}" for w in w_items[:3]) if w_items else "• Analyse more posts to identify top performers"
-        txt(s, w_text[:260], Inches(0.55), Inches(2.97), Inches(4.1), Inches(1.5), 10, color=light)
-        bar(s, Inches(5.15), Inches(2.55), Inches(4.45), Inches(2.2), RGBColor(0x1E,0x10,0x10))
-        txt(s, "GAPS / OPPORTUNITIES", Inches(5.3), Inches(2.65), Inches(4), Inches(0.3), 9, color=RGBColor(0xF5,0x9E,0x0B), bold=True)
-        g_items = strategy.get("what_to_stop") or []
-        g_text  = "\n".join(f"• {g}" for g in g_items[:3]) if g_items else "• Limited Reels usage\n• No brand storytelling content\n• Low community/UGC content"
-        txt(s, g_text[:260], Inches(5.3), Inches(2.97), Inches(4.1), Inches(1.5), 10, color=light)
+        for title, col, items, x, y in sections_3:
+            bar(s, x, y, Inches(4.6), Inches(1.9), mid_dark)
+            bar(s, x, y, Inches(4.6), Inches(0.05), col)
+            txt(s, title, x + Inches(0.15), y + Inches(0.1), Inches(4.2), Inches(0.3), 8, color=col, bold=True)
+            for j, item in enumerate(items[:3]):
+                txt(s, f"• {str(item)[:78]}", x + Inches(0.15), y + Inches(0.45 + j * 0.44), Inches(4.3), Inches(0.38), 10, color=light)
         footer(s, 3)
 
-        # ── Slide 4: Business Understanding ──
+        # ── Slide 4: Competitor Intelligence ──
         s = prs.slides.add_slide(blank); bg(s, dark)
         bar(s, 0, 0, Inches(10), Inches(0.06), brand_color)
-        txt(s, "03  ·  BUSINESS UNDERSTANDING", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
-        txt(s, "Who they are, what they're really selling.", Inches(0.4), Inches(0.58), Inches(9), Inches(0.5), 20, bold=True)
-        bk = brand_knowledge or {}
-        bar(s, Inches(0.4), Inches(1.22), Inches(4.5), Inches(1.6), mid_dark)
-        txt(s, "WHAT THE BRAND DOES", Inches(0.55), Inches(1.33), Inches(4.1), Inches(0.3), 9, color=accent, bold=True)
-        brand_desc = (bk.get("brand_overview") or bk.get("description") or
-                      f"{name} operates in the {niche} space, serving {brand.get('targetAudience', 'their target audience')} with quality products and services.")
-        txt(s, str(brand_desc)[:260], Inches(0.55), Inches(1.63), Inches(4.1), Inches(1.0), 10, color=light)
-        bar(s, Inches(5.1), Inches(1.22), Inches(4.5), Inches(1.6), mid_dark)
-        txt(s, "UNIQUE VALUE PROPOSITION", Inches(5.25), Inches(1.33), Inches(4.1), Inches(0.3), 9, color=green, bold=True)
-        uvp = (bk.get("value_proposition") or bk.get("positioning") or
-               f"{name} stands out through {niche.split()[0] if niche else 'quality'}, customer focus, and a commitment to delivering real value for every buyer.")
-        txt(s, str(uvp)[:260], Inches(5.25), Inches(1.63), Inches(4.1), Inches(1.0), 10, color=light)
-        txt(s, "PRIMARY BUSINESS GOALS (next 90 days)", Inches(0.4), Inches(2.98), Inches(9.2), Inches(0.32), 9, color=grey, bold=True)
-        tactics = strategy.get("growth_tactics") or []
-        goals_text = "\n".join(f"{i+1}.  {t}" for i, t in enumerate(tactics[:4])) if tactics else (
-            "1.  Build brand awareness and grow Instagram following\n"
-            "2.  Establish content consistency: 5-6 posts/week\n"
-            "3.  Develop community through active engagement\n"
-            "4.  Drive website/store visits from social content")
-        txt(s, goals_text[:360], Inches(0.4), Inches(3.3), Inches(9.2), Inches(1.7), 10, color=light)
+        txt(s, "03  ·  COMPETITOR INTELLIGENCE", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
+        txt(s, "Who you're up against — and where you win.", Inches(0.4), Inches(0.55), Inches(9), Inches(0.5), 20, bold=True)
+        diff_strat = cd.get("differentiation_strategy") or ""
+        if diff_strat:
+            txt(s, f'"{str(diff_strat)[:200]}"', Inches(0.4), Inches(1.05), Inches(9.2), Inches(0.45), 10, color=grey, italic=True)
+        comp_adv    = strategy.get("competitor_advantage") or []
+        comp_gaps   = cd.get("content_gaps") or cd.get("gaps_to_fill") or []
+        formats_own = cd.get("content_formats_to_own") or []
+        col4_items  = [
+            ("OUR DIFFERENTIATORS",      brand_color, comp_adv[:3]    or ["Stronger storytelling", "Deeper niche expertise", "Community-first approach"]),
+            ("COMPETITOR GAPS TO FILL",  green,       comp_gaps[:3]   or ["Underserved audience segments", "Missing educational content", "No UGC strategy"]),
+            ("FORMATS WE WILL OWN",      accent,      formats_own[:3] or ["Educational Reels", "Behind-the-scenes Stories", "Community Carousels"]),
+        ]
+        for i, (title, col, items) in enumerate(col4_items):
+            x = Inches(0.3 + i * 3.2)
+            bar(s, x, Inches(1.6), Inches(3.0), Inches(3.6), mid_dark)
+            bar(s, x, Inches(1.6), Inches(3.0), Inches(0.05), col)
+            txt(s, title, x + Inches(0.12), Inches(1.72), Inches(2.8), Inches(0.35), 8, color=col, bold=True)
+            for j, item in enumerate(items[:4]):
+                txt(s, f"→ {str(item)[:58]}", x + Inches(0.12), Inches(2.12 + j * 0.6), Inches(2.8), Inches(0.55), 10, color=light)
         footer(s, 4)
 
-        # ── Slide 5: Industry Landscape ──
+        # ── Slide 5: Market Gap Analysis ──
         s = prs.slides.add_slide(blank); bg(s, dark)
         bar(s, 0, 0, Inches(10), Inches(0.06), brand_color)
-        txt(s, "04  ·  INDUSTRY LANDSCAPE", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
-        txt(s, "What's happening in this category right now.", Inches(0.4), Inches(0.58), Inches(9), Inches(0.5), 20, bold=True)
-        trends_list = rd.get("trending_angles") or ["Short-form video dominates", "UGC and authenticity drive trust", "Edu-tainment format is rising"]
-        gaps_list   = cd.get("gaps_to_fill") or cd.get("content_gaps") or ["Limited educational content", "Low community engagement", "Missing behind-the-scenes content"]
-        vf_list     = rd.get("viral_formats") or ["Reels with trending audio", "Carousel how-to posts", "Customer story testimonials"]
-        cat_state   = rd.get("market_context") or f"The {niche} market is growing, driven by digital-first consumers and increasing social commerce adoption."
-        boxes_5 = [
-            ("CATEGORY STATE", str(cat_state)[:220], brand_color),
-            ("KEY TRENDS",     "\n".join(f"• {t}" for t in (trends_list if isinstance(trends_list, list) else [str(trends_list)])[:4])[:220], accent),
-            ("TOP BRANDS DO WELL", "\n".join(f"• {f}" for f in (vf_list if isinstance(vf_list, list) else [str(vf_list)])[:3])[:180], green),
-            ("GAPS TO EXPLOIT", "\n".join(f"• {g}" for g in (gaps_list if isinstance(gaps_list, list) else [str(gaps_list)])[:3])[:180], RGBColor(0xF5,0x9E,0x0B)),
+        txt(s, "04  ·  MARKET GAP ANALYSIS", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
+        txt(s, "Where the opportunity lives.", Inches(0.4), Inches(0.55), Inches(9), Inches(0.5), 20, bold=True)
+        trends_list = rd.get("trending_angles") or [t.get("title","") for t in rd.get("trends",[])[:4]]
+        pain_list   = rd.get("audience_pain_insights") or []
+        audience_pain_brand = brand.get("audiencePainPoints","")
+        gap5_sections = [
+            ("CONTENT GAPS",          accent,                     comp_gaps[:3]   or ["Lacking educational series", "No long-form value content"]),
+            ("AUDIENCE GAPS",         green,                      pain_list[:3]   or ([audience_pain_brand] if audience_pain_brand else ["Unaddressed pain points in niche"])),
+            ("TREND OPPORTUNITIES",   RGBColor(0xF5,0x9E,0x0B),  [str(t)[:70] for t in trends_list[:3]] or ["Trending formats in niche"]),
+            ("CATEGORY WEAKNESSES",   red,                        [str(g)[:70] for g in (cd.get("gaps_to_fill") or comp_gaps)[:3]] or ["Generic content dominates niche"]),
         ]
-        for i, (lbl, ct, col) in enumerate(boxes_5):
-            x = Inches(0.3 + i * 2.38)
-            bar(s, x, Inches(1.3), Inches(2.2), Inches(3.7), mid_dark)
-            bar(s, x, Inches(1.3), Inches(2.2), Inches(0.06), col)
-            txt(s, lbl, x+Inches(0.12), Inches(1.42), Inches(2.0), Inches(0.32), 8, color=col, bold=True)
-            txt(s, ct, x+Inches(0.12), Inches(1.74), Inches(2.0), Inches(3.0), 9, color=light)
+        for i, (title, col, items) in enumerate(gap5_sections):
+            row, col_x = divmod(i, 2)
+            x = Inches(0.3 + col_x * 4.8)
+            y = Inches(1.15 + row * 2.12)
+            bar(s, x, y, Inches(4.5), Inches(1.88), mid_dark)
+            bar(s, x, y, Inches(4.5), Inches(0.05), col)
+            txt(s, title, x + Inches(0.15), y + Inches(0.1), Inches(4.1), Inches(0.3), 8, color=col, bold=True)
+            for j, item in enumerate(items[:3]):
+                txt(s, f"• {str(item)[:68]}", x + Inches(0.15), y + Inches(0.45 + j * 0.44), Inches(4.2), Inches(0.38), 10, color=light)
         footer(s, 5)
 
-        # ── Slide 6: Audience Segments ──
+        # ── Slide 6: Content Pillar Breakdown ──
         s = prs.slides.add_slide(blank); bg(s, dark)
         bar(s, 0, 0, Inches(10), Inches(0.06), brand_color)
-        txt(s, "05  ·  AUDIENCE SEGMENTS", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
-        txt(s, "Who we're speaking to — and why they listen.", Inches(0.4), Inches(0.58), Inches(9), Inches(0.5), 20, bold=True)
-        target_aud = brand.get("targetAudience") or f"{niche} enthusiasts and buyers"
-        bar(s, Inches(0.4), Inches(1.22), Inches(3.0), Inches(1.0), brand_color)
-        txt(s, str(target_aud)[:50], Inches(0.5), Inches(1.35), Inches(2.8), Inches(0.65), 13, bold=True)
-        ar_insights = ar.get("audience_insights") if isinstance(ar.get("audience_insights"), dict) else {}
-        pain_items  = (rd.get("audience_pain_insights") or ar_insights.get("pain_points") or
-                       ["High costs and poor quality options", "Unreliable after-sales support", "Difficulty finding trusted brands", "Limited product information online"])
-        desire_items = (ar_insights.get("desires") or
-                        ["Quality products at fair price", "Fast and reliable delivery", "Excellent customer service", "Trusted brand with good reviews"])
-        bar(s, Inches(0.4), Inches(2.42), Inches(4.5), Inches(2.35), RGBColor(0x2E,0x0D,0x0D))
-        txt(s, "PAINS", Inches(0.55), Inches(2.52), Inches(4), Inches(0.3), 9, color=red, bold=True)
-        pain_text = "\n".join(f"– {p}" for p in (pain_items[:4] if isinstance(pain_items, list) else [str(pain_items)]))
-        txt(s, pain_text[:260], Inches(0.55), Inches(2.82), Inches(4.1), Inches(1.7), 10, color=light)
-        bar(s, Inches(5.1), Inches(2.42), Inches(4.5), Inches(2.35), RGBColor(0x0D,0x2E,0x1F))
-        txt(s, "DESIRES", Inches(5.25), Inches(2.52), Inches(4), Inches(0.3), 9, color=green, bold=True)
-        desire_text = "\n".join(f"– {d}" for d in (desire_items[:4] if isinstance(desire_items, list) else [str(desire_items)]))
-        txt(s, desire_text[:260], Inches(5.25), Inches(2.82), Inches(4.1), Inches(1.7), 10, color=light)
+        txt(s, "05  ·  CONTENT PILLAR BREAKDOWN", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
+        txt(s, "What to create — and how hard to push it.", Inches(0.4), Inches(0.55), Inches(9), Inches(0.5), 20, bold=True)
+        pillar_breakdown = strategy.get("pillar_breakdown") or []
+        if not pillar_breakdown and pillar_list:
+            pillar_breakdown = [
+                {"pillar": str(p), "current_performance": "medium", "growth_potential": "high",
+                 "recommended_frequency": "2x/week", "expected_impact": "Build authority in niche"}
+                for p in pillar_list[:4]
+            ]
+        header_cols = [("CONTENT PILLAR", Inches(0.3)), ("PERFORMANCE", Inches(3.85)),
+                       ("POTENTIAL", Inches(5.5)), ("FREQUENCY", Inches(6.95)), ("IMPACT", Inches(8.1))]
+        bar(s, Inches(0.3), Inches(1.15), Inches(9.4), Inches(0.38), RGBColor(0x1A, 0x10, 0x35))
+        for col_label, x in header_cols:
+            txt(s, col_label, x + Inches(0.08), Inches(1.19), Inches(1.5), Inches(0.3), 7, color=accent, bold=True)
+        perf_colors = {"high": green, "medium": RGBColor(0xF5,0x9E,0x0B), "low": red}
+        for i, pb in enumerate(pillar_breakdown[:4]):
+            y = Inches(1.58 + i * 0.88)
+            row_bg = mid_dark if i % 2 == 0 else RGBColor(0x16, 0x10, 0x30)
+            bar(s, Inches(0.3), y, Inches(9.4), Inches(0.82), row_bg)
+            perf = str(pb.get("current_performance", "medium")).lower()
+            pot  = str(pb.get("growth_potential", "high")).lower()
+            freq = str(pb.get("recommended_frequency", "2x/week"))[:15]
+            imp  = str(pb.get("expected_impact", ""))[:55]
+            pillar_name = str(pb.get("pillar", ""))[:45]
+            txt(s, pillar_name, Inches(0.42), y + Inches(0.08), Inches(3.3), Inches(0.65), 11, color=white)
+            txt(s, perf.upper(), Inches(3.95), y + Inches(0.18), Inches(1.4), Inches(0.45), 11, bold=True, color=perf_colors.get(perf, white))
+            txt(s, pot.upper(),  Inches(5.58), y + Inches(0.18), Inches(1.3), Inches(0.45), 11, bold=True, color=perf_colors.get(pot, white))
+            txt(s, freq,         Inches(7.02), y + Inches(0.18), Inches(1.0), Inches(0.45), 11, color=accent)
+            txt(s, imp,          Inches(8.17), y + Inches(0.08), Inches(1.45), Inches(0.65), 9, color=grey)
         footer(s, 6)
 
-        # ── Slide 7: Growth Pillars ──
+        # ── Slide 7: Follower Goal Strategy ──
         s = prs.slides.add_slide(blank); bg(s, dark)
         bar(s, 0, 0, Inches(10), Inches(0.06), brand_color)
-        txt(s, "06  ·  GROWTH PILLARS", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
-        txt(s, "The strategic themes that will drive every post.", Inches(0.4), Inches(0.58), Inches(9), Inches(0.5), 20, bold=True)
-        pillars      = strategy.get("pillars") or ["Brand Storytelling", "Product Education", "Community Building"]
-        series_ideas = strategy.get("content_series_ideas") or []
-        fmt_map      = ["Reels, Carousels, Stories", "Videos, Infographics, Carousels", "UGC, Polls, Live Streams"]
-        pct_map      = ["40%", "30%", "30%"]
-        p_colors     = [brand_color, green, accent]
-        for i, pillar in enumerate(pillars[:3]):
-            col = p_colors[i % 3]
-            x   = Inches(0.3 + i * 3.25)
-            w   = Inches(3.0)
-            bar(s, x, Inches(1.25), w, Inches(3.7), mid_dark)
-            bar(s, x, Inches(1.25), w, Inches(0.06), col)
-            txt(s, f"PILLAR {i+1}",      x+Inches(0.15), Inches(1.33), w-Inches(0.2), Inches(0.28), 8,  color=col, bold=True)
-            txt(s, str(pillar),           x+Inches(0.15), Inches(1.62), w-Inches(0.2), Inches(0.52), 14, bold=True)
-            txt(s, pct_map[i]+" OF CALENDAR", x+Inches(0.15), Inches(2.18), w-Inches(0.2), Inches(0.28), 10, color=col, bold=True)
-            txt(s, "FORMATS",             x+Inches(0.15), Inches(2.58), w-Inches(0.2), Inches(0.25), 8,  color=grey, bold=True)
-            txt(s, fmt_map[i],            x+Inches(0.15), Inches(2.83), w-Inches(0.2), Inches(0.32), 9,  color=light)
-            if series_ideas and i < len(series_ideas):
-                txt(s, "EXAMPLE SERIES", x+Inches(0.15), Inches(3.22), w-Inches(0.2), Inches(0.25), 8, color=grey, bold=True)
-                txt(s, str(series_ideas[i])[:100], x+Inches(0.15), Inches(3.47), w-Inches(0.2), Inches(0.65), 9, color=light)
+        txt(s, "06  ·  FOLLOWER GOAL STRATEGY", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
+        txt(s, "The math behind your growth target.", Inches(0.4), Inches(0.55), Inches(9), Inches(0.5), 20, bold=True)
+        accel   = feas.get("acceleration_needed", 1.0)
+        prob    = feas.get("probability_pct", 70)
+        req_wk  = feas.get("required_weekly_growth", 0)
+        req_day = feas.get("required_daily_growth", 0)
+        est_wk  = feas.get("est_current_weekly_growth", 5)
+        proj    = feas.get("projected_growth_at_pace", 0)
+        f_risks = feas.get("risks", [])
+        data_mode = "Live IG data" if ig_connected else "Cold-start estimate"
+        math_cards = [
+            ("CURRENT",       f"{followers:,}", brand_color),
+            ("TARGET",        f"{goal:,}",      green),
+            ("GAP",           f"+{gap:,}",       red if gap > 0 else green),
+            ("NEED / WEEK",   str(req_wk),      RGBColor(0xF5,0x9E,0x0B)),
+            ("NEED / DAY",    str(req_day),     accent),
+        ]
+        for i, (lbl, val, col) in enumerate(math_cards):
+            x = Inches(0.3 + i * 1.9)
+            bar(s, x, Inches(1.1), Inches(1.78), Inches(1.65), mid_dark)
+            bar(s, x, Inches(1.1), Inches(1.78), Inches(0.05), col)
+            txt(s, lbl, x + Inches(0.1), Inches(1.18), Inches(1.6), Inches(0.3), 8, color=col, bold=True)
+            txt(s, str(val), x + Inches(0.1), Inches(1.5), Inches(1.6), Inches(0.65), 20, bold=True, color=col, align=PP_ALIGN.CENTER)
+        prob_col = green if prob >= 70 else (RGBColor(0xF5,0x9E,0x0B) if prob >= 40 else red)
+        bar(s, Inches(0.3), Inches(2.9), Inches(3.0), Inches(1.35), mid_dark)
+        txt(s, "SUCCESS PROBABILITY", Inches(0.42), Inches(2.98), Inches(2.8), Inches(0.3), 8, color=prob_col, bold=True)
+        txt(s, f"{prob}%", Inches(0.42), Inches(3.3), Inches(2.8), Inches(0.65), 28, bold=True, color=prob_col)
+        txt(s, f"{accel}x acceleration needed  ·  {data_mode}", Inches(0.42), Inches(3.9), Inches(2.8), Inches(0.25), 8, color=grey, italic=True)
+        bar(s, Inches(3.5), Inches(2.9), Inches(6.2), Inches(1.35), mid_dark)
+        txt(s, "RISKS & NON-NEGOTIABLES", Inches(3.62), Inches(2.98), Inches(5.9), Inches(0.3), 8, color=red, bold=True)
+        goal_strat = strategy.get("goal_strategy") or {}
+        nonneg     = goal_strat.get("non_negotiable_actions") or f_risks or ["Daily Reel posting for first 7 days"]
+        for j, item in enumerate(nonneg[:3]):
+            txt(s, f"⚡ {str(item)[:88]}", Inches(3.62), Inches(3.32 + j * 0.3), Inches(5.9), Inches(0.28), 9, color=light)
         footer(s, 7)
 
-        # ── Slide 8: Content Strategy ──
+        # ── Slide 8: Action Plan ──
         s = prs.slides.add_slide(blank); bg(s, dark)
         bar(s, 0, 0, Inches(10), Inches(0.06), brand_color)
-        txt(s, "07  ·  CONTENT STRATEGY", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
-        txt(s, "Format mix, frequency, hooks.", Inches(0.4), Inches(0.58), Inches(9), Inches(0.5), 20, bold=True)
-        post_freq    = strategy.get("posting_frequency", "5-6 posts/week + daily stories")
-        best_times   = strategy.get("best_times") or ["9:00 AM", "12:30 PM", "6:00 PM"]
-        hook_styles  = strategy.get("hook_strategy") or []
-        hashtag_strat = strategy.get("hashtag_strategy") or f"Mix branded #{name.replace(' ','')} hashtags with 10-15 niche-specific and 3-5 trending tags per post."
-        cs_boxes = [
-            ("POSTING FREQUENCY", str(post_freq),                                                       brand_color),
-            ("HOOK STRATEGY",     str(hook_styles[0])[:160] if hook_styles else "Stop-the-scroll openers: questions, surprising facts, relatable pain points in the first 1-2 seconds.", accent),
-            ("HASHTAG STRATEGY",  str(hashtag_strat)[:160],                                             green),
-            ("BEST POSTING TIMES","Peak hours: " + "  ·  ".join(str(t) for t in best_times[:3]),        RGBColor(0xF5,0x9E,0x0B)),
+        txt(s, "07  ·  ACTION PLAN", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
+        txt(s, "What to do — every single day.", Inches(0.4), Inches(0.55), Inches(9), Inches(0.5), 20, bold=True)
+        day_plan_all = strategy.get("day_by_day_plan") or []
+        day1 = day_plan_all[0] if day_plan_all else {}
+        tactics = strategy.get("growth_tactics") or []
+        platform_exp = strategy.get("platform_expansion") or {}
+        daily_actions = [
+            day1.get("content_task")    or "Post 1 brand Reel with strong hook",
+            day1.get("growth_task")     or "Engage with 10 niche accounts (like, comment)",
+            day1.get("engagement_task") or "Reply to all comments within 1 hour",
+            day1.get("community_task")  or "DM 5 new potential followers with value",
         ]
-        for i, (lbl, ct, col) in enumerate(cs_boxes):
-            row = i // 2; col_idx = i % 2
-            x = Inches(0.35 + col_idx * 4.8)
-            y = Inches(1.3  + row    * 1.82)
-            bar(s, x, y, Inches(4.55), Inches(1.6), mid_dark)
-            bar(s, x, y, Inches(4.55), Inches(0.06), col)
-            txt(s, lbl, x+Inches(0.15), y+Inches(0.12), Inches(4.2), Inches(0.3), 8, color=col, bold=True)
-            txt(s, ct,  x+Inches(0.15), y+Inches(0.42), Inches(4.2), Inches(0.95), 10, color=light)
+        weekly_actions = tactics[:4] or ["Content batch creation (3-5 posts)", "Story polls for audience feedback", "Weekly competitor audit", "Hashtag refresh and testing"]
+        platform_actions = [
+            f"Reels: {str(platform_exp.get('reels','Lead with Reels 3-5x/week'))[:65]}" if platform_exp.get('reels') else "Reels: 3-5 per week for maximum organic reach",
+            f"Stories: {str(platform_exp.get('stories','Daily behind-the-scenes'))[:65]}" if platform_exp.get('stories') else "Stories: Daily polls, Q&As, and behind-the-scenes",
+            f"Carousels: {str(platform_exp.get('carousels','Educational saves'))[:65]}" if platform_exp.get('carousels') else "Carousels: 1-2 per week optimised for saves",
+            f"Best posting times: {', '.join(str(t) for t in strategy.get('best_times', ['9AM','12PM','6PM'])[:3])}",
+        ]
+        action_cols = [
+            ("DAILY ACTIONS",    brand_color, daily_actions),
+            ("WEEKLY ACTIONS",   green,       weekly_actions),
+            ("PLATFORM-SPECIFIC", accent,     platform_actions),
+        ]
+        for i, (col_title, col, items) in enumerate(action_cols):
+            x = Inches(0.3 + i * 3.2)
+            bar(s, x, Inches(1.15), Inches(3.0), Inches(4.2), mid_dark)
+            bar(s, x, Inches(1.15), Inches(3.0), Inches(0.05), col)
+            txt(s, col_title, x + Inches(0.12), Inches(1.24), Inches(2.8), Inches(0.32), 8, color=col, bold=True)
+            for j, item in enumerate(items[:4]):
+                txt(s, f"• {str(item)[:70]}", x + Inches(0.12), Inches(1.6 + j * 0.83), Inches(2.8), Inches(0.76), 10, color=light)
         footer(s, 8)
 
-        # ── Slide 9: 30-Day Campaign Roadmap ──
+        # ── Slide 9: Execution Timeline ──
         s = prs.slides.add_slide(blank); bg(s, dark)
         bar(s, 0, 0, Inches(10), Inches(0.06), brand_color)
-        txt(s, "08  ·  30-DAY CAMPAIGN ROADMAP", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
-        txt(s, "Week-by-week arc.", Inches(0.4), Inches(0.58), Inches(9), Inches(0.5), 20, bold=True)
-        follower_plan = strategy.get("follower_plan") or {}
-        monthly_themes = strategy.get("monthly_themes") or []
-        wk_colors = [brand_color, accent, green, RGBColor(0xF5,0x9E,0x0B)]
-        wk_titles = ["Foundation & Awareness", "Product Focus", "Community & Engagement", "Conversion & Growth"]
-        if len(monthly_themes) >= 2:
-            wk_titles[0] = str(monthly_themes[0])[:35]
-            wk_titles[1] = str(monthly_themes[1])[:35]
-        fp = follower_plan if isinstance(follower_plan, dict) else {}
-        wk_goals = [
-            fp.get("week1", followers + max(20, gap//8)),
-            fp.get("week2", followers + max(45, gap//4)),
-            fp.get("week3", followers + max(75, gap//2)),
-            fp.get("week4", followers + max(110, gap*3//4)),
-        ]
-        wk_desc = [
-            "Brand story content + pillar intro\nGoal: {g} followers",
-            "Educational + product showcase posts\nGoal: {g} followers",
-            "UGC campaigns + interactive stories\nGoal: {g} followers",
-            "Strong CTA content + monthly recap\nGoal: {g} followers",
-        ]
-        for i in range(4):
-            col = wk_colors[i]
-            x   = Inches(0.3 + i * 2.38)
-            g_val = wk_goals[i]
-            if isinstance(g_val, str):
-                try: g_val = int(g_val.replace(",",""))
-                except: g_val = followers + 50
-            bar(s, x, Inches(1.25), Inches(2.2), Inches(3.7), mid_dark)
-            bar(s, x, Inches(1.25), Inches(2.2), Inches(0.06), col)
-            txt(s, f"WEEK {i+1}",      x+Inches(0.15), Inches(1.33), Inches(2.0), Inches(0.3),  9,  color=col, bold=True)
-            txt(s, wk_titles[i],       x+Inches(0.15), Inches(1.63), Inches(2.0), Inches(0.48), 12, bold=True)
-            txt(s, "KEY CAMPAIGNS",    x+Inches(0.15), Inches(2.17), Inches(2.0), Inches(0.25), 8,  color=grey, bold=True)
-            txt(s, wk_desc[i].format(g=f"{g_val:,}"), x+Inches(0.15), Inches(2.44), Inches(2.0), Inches(2.2), 9, color=light)
+        txt(s, "08  ·  EXECUTION TIMELINE", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
+        horizon_label = f"{days_ahead}-Day Day-by-Day Plan" if days_ahead <= 21 else f"{days_ahead}-Day Weekly Roadmap"
+        txt(s, horizon_label, Inches(0.4), Inches(0.55), Inches(9), Inches(0.5), 20, bold=True)
+        week_plan = strategy.get("weekly_plan") or []
+        if day_plan_all and days_ahead <= 21:
+            week_groups  = [day_plan_all[:5], day_plan_all[5:10], day_plan_all[10:15]]
+            week_labels  = ["WEEK 1 — DAYS 1–5", "WEEK 2 — DAYS 6–10", "WEEK 3 — DAYS 11–15"]
+            week_colors  = [brand_color, green, accent]
+            for i, (wg, wl, wc) in enumerate(zip(week_groups, week_labels, week_colors)):
+                x = Inches(0.3 + i * 3.2)
+                bar(s, x, Inches(1.15), Inches(3.0), Inches(4.2), mid_dark)
+                bar(s, x, Inches(1.15), Inches(3.0), Inches(0.05), wc)
+                txt(s, wl, x + Inches(0.12), Inches(1.24), Inches(2.8), Inches(0.32), 7, color=wc, bold=True)
+                for j, day in enumerate(wg[:5]):
+                    dy = Inches(1.62 + j * 0.72)
+                    bar(s, x + Inches(0.05), dy, Inches(2.88), Inches(0.66), RGBColor(0x1A, 0x10, 0x35))
+                    day_num = day.get("day", i * 5 + j + 1)
+                    ctask   = str(day.get("content_task") or "")[:44]
+                    kpi_t   = str(day.get("kpi_target") or "")[:28]
+                    txt(s, f"Day {day_num}", x + Inches(0.12), dy + Inches(0.04), Inches(0.7), Inches(0.24), 8, color=wc, bold=True)
+                    txt(s, ctask,  x + Inches(0.12), dy + Inches(0.27), Inches(2.65), Inches(0.22), 8, color=light)
+                    txt(s, kpi_t,  x + Inches(0.12), dy + Inches(0.49), Inches(2.65), Inches(0.17), 7, color=grey)
+        elif week_plan:
+            for i, wk in enumerate(week_plan[:4]):
+                wc = [brand_color, green, accent, RGBColor(0xF5,0x9E,0x0B)][i % 4]
+                x  = Inches(0.3 + i * 2.4)
+                bar(s, x, Inches(1.15), Inches(2.2), Inches(4.2), mid_dark)
+                bar(s, x, Inches(1.15), Inches(2.2), Inches(0.05), wc)
+                txt(s, f"WEEK {wk.get('week', i+1)}", x + Inches(0.12), Inches(1.24), Inches(2.0), Inches(0.32), 8, color=wc, bold=True)
+                txt(s, str(wk.get("theme",""))[:35],         x + Inches(0.12), Inches(1.6),  Inches(2.0), Inches(0.38), 12, bold=True, color=white)
+                txt(s, str(wk.get("content_tasks",""))[:80], x + Inches(0.12), Inches(2.02), Inches(2.0), Inches(1.1),  10, color=light)
+                txt(s, f"KPI: {str(wk.get('kpi_target',''))[:42]}", x + Inches(0.12), Inches(3.18), Inches(2.0), Inches(0.35), 9, color=wc)
+        else:
+            follower_plan = strategy.get("follower_plan") or {}
+            for i, (wk, label) in enumerate(zip(["week1","week2","week3","week4"], ["Week 1","Week 2","Week 3","Week 4"])):
+                val = follower_plan.get(wk, followers + int(gap / 4) * (i + 1))
+                wc  = [brand_color, green, accent, RGBColor(0xF5,0x9E,0x0B)][i]
+                x   = Inches(0.3 + i * 2.4)
+                bar(s, x, Inches(1.15), Inches(2.2), Inches(2.0), mid_dark)
+                bar(s, x, Inches(1.15), Inches(2.2), Inches(0.05), wc)
+                txt(s, label, x + Inches(0.12), Inches(1.24), Inches(2.0), Inches(0.32), 8, color=wc, bold=True)
+                txt(s, f"{val:,} followers", x + Inches(0.12), Inches(1.6), Inches(2.0), Inches(0.45), 14, bold=True, color=wc)
+            for j, t in enumerate((strategy.get("growth_tactics") or [])[:4]):
+                txt(s, f"• {t}", Inches(0.4), Inches(3.4 + j * 0.38), Inches(9.2), Inches(0.35), 10, color=light)
         footer(s, 9)
 
-        # ── Slide 10: Trend Watch ──
+        # ── Slide 10: KPIs & Success Metrics ──
         s = prs.slides.add_slide(blank); bg(s, dark)
         bar(s, 0, 0, Inches(10), Inches(0.06), brand_color)
-        txt(s, "09  ·  TREND WATCH", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
-        txt(s, "Specific trends to ride this month.", Inches(0.4), Inches(0.58), Inches(9), Inches(0.5), 20, bold=True)
-        trend_angles = rd.get("trending_angles") or strategy.get("viral_opportunities") or []
-        vf_list2     = rd.get("viral_formats") or []
-        default_how  = ["Create Reels showcasing this angle with trending audio + text overlay.",
-                         "Use Carousels to educate: 'Did you know?' style posts convert best.",
-                         "Behind-the-scenes Stories build trust and drive DM conversations."]
-        for i in range(3):
-            y     = Inches(1.3 + i * 1.35)
-            trend = trend_angles[i] if i < len(trend_angles) else f"Trending topic #{i+1} in {niche}"
-            how   = str(vf_list2[i])[:100] if i < len(vf_list2) else default_how[i]
-            bar(s, Inches(0.4), y, Inches(9.2), Inches(1.18), mid_dark)
-            bar(s, Inches(0.4), y, Inches(0.06), Inches(1.18), brand_color)
-            txt(s, str(i+1), Inches(0.55), y+Inches(0.08), Inches(0.4), Inches(0.6), 20, bold=True, color=brand_color)
-            txt(s, str(trend)[:90], Inches(1.02), y+Inches(0.08), Inches(8.0), Inches(0.45), 13, bold=True)
-            txt(s, f"WHY RELEVANT: {name} can capitalize on this in {niche} to grow reach.", Inches(1.02), y+Inches(0.55), Inches(8.0), Inches(0.28), 9, color=grey)
-            txt(s, f"How to ride: {how}", Inches(1.02), y+Inches(0.83), Inches(8.0), Inches(0.28), 9, color=light, italic=True)
-        footer(s, 10)
-
-        # ── Slide 11: KPIs & Success Metrics ──
-        s = prs.slides.add_slide(blank); bg(s, dark)
-        bar(s, 0, 0, Inches(10), Inches(0.06), brand_color)
-        txt(s, "10  ·  KPIs & SUCCESS METRICS", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
-        txt(s, "What success looks like in 90 days.", Inches(0.4), Inches(0.58), Inches(9), Inches(0.5), 20, bold=True)
-        kpi_90     = strategy.get("kpi_targets_90day") or {}
-        kpi_fol    = int(kpi_90.get("followers", goal) or goal)
-        kpi_er     = kpi_90.get("avg_engagement_rate", "10%+")
-        kpi_reach  = kpi_90.get("avg_reach", "500-700")
-        kpi_reels  = kpi_90.get("reels_per_week", 4)
-        kpi_saves  = kpi_90.get("saves_per_post", 20)
-        kpi_items  = [
-            ("FOLLOWER GROWTH",  f"{followers:,} → {kpi_fol:,}", brand_color),
-            ("ENGAGEMENT RATE",  str(kpi_er),                     green),
-            ("REACH PER POST",   f"{kpi_reach} reach",            accent),
-            ("REELS / WEEK",     f"{kpi_reels}x / week",          RGBColor(0xF5,0x9E,0x0B)),
-            ("SAVES PER POST",   f"{kpi_saves}+ saves",           RGBColor(0xEC,0x48,0x99)),
+        txt(s, "09  ·  KPIs & SUCCESS METRICS", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
+        txt(s, "How we measure winning.", Inches(0.4), Inches(0.55), Inches(9), Inches(0.5), 20, bold=True)
+        kpi_90 = strategy.get("kpi_targets_90day") or strategy.get("kpi_targets_30day") or ar.get("kpi_targets_90day") or {}
+        if not isinstance(kpi_90, dict): kpi_90 = {}
+        kpi_fol   = int(kpi_90.get("followers", goal) or goal)
+        kpi_er    = kpi_90.get("avg_engagement_rate", "3-5")
+        kpi_reach = kpi_90.get("avg_reach", int(avg_reach * 1.5) if avg_reach else 1000)
+        kpi_reels = kpi_90.get("reels_per_week", 4)
+        kpi_saves = kpi_90.get("saves_per_post", 20)
+        kpi_items = [
+            ("FOLLOWER TARGET", f"{followers:,} → {kpi_fol:,}", brand_color),
+            ("ENGAGEMENT RATE", f"{kpi_er}%",                   green),
+            ("REACH PER POST",  f"{kpi_reach:,}+",              accent),
+            ("REELS / WEEK",    f"{kpi_reels}x",                RGBColor(0xF5,0x9E,0x0B)),
+            ("SAVES PER POST",  f"{kpi_saves}+",                RGBColor(0xEC,0x48,0x99)),
         ]
         for i, (lbl, val, col) in enumerate(kpi_items):
             x = Inches(0.3 + i * 1.9)
@@ -712,84 +828,40 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
             bar(s, x, Inches(1.3), Inches(1.8), Inches(0.06), col)
             txt(s, lbl, x+Inches(0.1), Inches(1.42), Inches(1.6), Inches(0.3), 8, color=col, bold=True)
             txt(s, val, x+Inches(0.1), Inches(1.76), Inches(1.6), Inches(0.65), 16, bold=True)
-        footer(s, 11)
+        posting_freq = strategy.get("posting_frequency", "1-2x daily")
+        best_times_list = strategy.get("best_times", ["9AM","12PM","6PM"])
+        txt(s, f"Posting frequency: {posting_freq}  ·  Best times: {', '.join(str(t) for t in best_times_list[:3])}",
+            Inches(0.4), Inches(4.78), Inches(9.2), Inches(0.35), 11, color=grey)
+        footer(s, 10)
 
-        # ── Slide 12: Recommendations ──
+        # ── Slide 11: Priority Recommendations ──
         s = prs.slides.add_slide(blank); bg(s, dark)
         bar(s, 0, 0, Inches(10), Inches(0.06), brand_color)
-        txt(s, "11  ·  RECOMMENDATIONS", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
-        txt(s, "Specific next steps, in priority order.", Inches(0.4), Inches(0.58), Inches(9), Inches(0.5), 20, bold=True)
-        recs = strategy.get("growth_tactics") or strategy.get("key_recommendations") or [
+        txt(s, "10  ·  PRIORITY RECOMMENDATIONS", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
+        txt(s, "Specific next steps, in priority order.", Inches(0.4), Inches(0.55), Inches(9), Inches(0.5), 20, bold=True)
+        recs = strategy.get("growth_tactics") or [
             "Increase posting frequency to 5-6 feed posts/week + daily stories",
             "Lead with Reels — highest reach format for this niche",
             "Launch a UGC/community challenge to build organic reach",
             "Use strong hooks in the first 1-2 seconds of every Reel",
-            "Post at peak times: " + "  ·  ".join(str(t) for t in (strategy.get("best_times") or ["9AM","12PM","6PM"])[:3]),
+            f"Post at peak times: {'  ·  '.join(str(t) for t in (strategy.get('best_times') or ['9AM','12PM','6PM'])[:3])}",
             "Engage actively in comments for 30 minutes after each post",
         ]
         for i, rec in enumerate(recs[:6]):
-            y = Inches(1.3 + i * 0.65)
-            bar(s, Inches(0.4), y, Inches(9.2), Inches(0.55), mid_dark)
-            bar(s, Inches(0.4), y, Inches(0.06), Inches(0.55), brand_color)
+            y = Inches(1.15 + i * 0.68)
+            bar(s, Inches(0.4), y, Inches(9.2), Inches(0.58), mid_dark)
+            bar(s, Inches(0.4), y, Inches(0.06), Inches(0.58), brand_color)
             txt(s, str(i+1), Inches(0.56), y+Inches(0.07), Inches(0.38), Inches(0.4), 14, bold=True, color=brand_color)
-            txt(s, str(rec)[:130], Inches(0.96), y+Inches(0.1), Inches(8.5), Inches(0.35), 11, color=light)
-        footer(s, 12)
+            txt(s, str(rec)[:130], Inches(0.96), y+Inches(0.1), Inches(8.5), Inches(0.4), 11, color=light)
+        footer(s, 11)
 
-        # ── Slide 13: Outro ──
+        # ── Slide 12: Outro ──
         s = prs.slides.add_slide(blank); bg(s, dark)
         bar(s, 0, 0, Inches(0.06), prs.slide_height, brand_color)
         txt(s, "Let's build.", Inches(0.4), Inches(1.7), Inches(9), Inches(1.3), 48, bold=True)
         txt(s, "PerformEdge  ·  Social Growth Partners", Inches(0.4), Inches(3.15), Inches(9), Inches(0.5), 16, color=accent)
-        txt(s, name, Inches(0.4), Inches(3.8), Inches(9), Inches(0.45), 14, color=RGBColor(0x6B,0x72,0x80), italic=True)
-
-        if ig_connected and followers > 0:
-            # LIVE DATA path
-            txt(s, "Current Instagram Performance", Inches(0.4), Inches(0.3), Inches(9), Inches(0.6), 26, bold=True)
-            stats = [
-                (f"{followers:,}", "Current Followers",       brand_color),
-                (f"{goal:,}",      f"Goal (+{gap:,} needed)", green),
-                (f"{avg_er}%",     "Avg Engagement Rate",     accent),
-                (f"{avg_reach:,}", "Avg Reach per Post",      white),
-                (f"{ig_audit.get('posts_analysed', 0)}", "Posts Analysed", RGBColor(0xF5,0x9E,0x0B)),
-            ]
-            for i, (val, label, color) in enumerate(stats):
-                x = Inches(0.3 + i * 1.9)
-                bar(s, x, Inches(1.2), Inches(1.7), Inches(2.2), RGBColor(0x1E,0x16,0x40))
-                txt(s, val,   x + Inches(0.1), Inches(1.4), Inches(1.5), Inches(0.8), 22, bold=True, color=color, align=PP_ALIGN.CENTER)
-                txt(s, label, x + Inches(0.05),Inches(2.2), Inches(1.6), Inches(0.5), 9,  color=RGBColor(0x9C,0xA3,0xAF), align=PP_ALIGN.CENTER)
-            bar(s, Inches(0.4), Inches(3.7), Inches(9.2), Inches(0.15), RGBColor(0x1E,0x16,0x40))
-            if goal > 0:
-                pct = min(followers / goal, 1.0)
-                bar(s, Inches(0.4), Inches(3.7), Inches(9.2 * pct), Inches(0.15), green)
-            txt(s, f"Progress to goal: {int(followers/goal*100) if goal else 0}%",
-                Inches(0.4), Inches(4.0), Inches(9), Inches(0.4), 11, color=accent)
-        else:
-            # LAUNCH-PLAN path — no IG connected, show KPI targets from analyst baseline
-            ar  = analyst_report or {}
-            kpi = ar.get("kpi_targets_90day") if isinstance(ar.get("kpi_targets_90day"), dict) else None
-            if not kpi:
-                kpi = strategy.get("kpi_targets_90day") if isinstance(strategy.get("kpi_targets_90day"), dict) else {}
-            kpi = kpi or {}
-            kpi_followers = int(kpi.get("followers", goal) or goal)
-            kpi_er        = kpi.get("avg_engagement_rate", "3-5")
-            kpi_reels     = kpi.get("reels_per_week", 4)
-            kpi_saves     = kpi.get("saves_per_post", 20)
-
-            txt(s, "Launch Strategy — 90-Day KPI Targets", Inches(0.4), Inches(0.3), Inches(9), Inches(0.6), 26, bold=True)
-            txt(s, "Instagram not yet connected. These are realistic 90-day milestones based on the brand brief.",
-                Inches(0.4), Inches(0.9), Inches(9), Inches(0.4), 11, color=RGBColor(0x9C,0xA3,0xAF), italic=True)
-            stats = [
-                (f"{kpi_followers:,}",     "90-Day Follower Target",  brand_color),
-                (f"{kpi_er}%",             "Target Engagement Rate",  green),
-                (f"{kpi_reels}/wk",        "Reels Cadence",           accent),
-                (f"{kpi_saves}",           "Target Saves/Post",       white),
-                ("Connect IG", "for Live Metrics", RGBColor(0xF5,0x9E,0x0B)),
-            ]
-            for i, (val, label, color) in enumerate(stats):
-                x = Inches(0.3 + i * 1.9)
-                bar(s, x, Inches(1.5), Inches(1.7), Inches(2.2), RGBColor(0x1E,0x16,0x40))
-                txt(s, val,   x + Inches(0.1), Inches(1.7), Inches(1.5), Inches(0.8), 20, bold=True, color=color, align=PP_ALIGN.CENTER)
-                txt(s, label, x + Inches(0.05),Inches(2.5), Inches(1.6), Inches(0.5), 9,  color=RGBColor(0x9C,0xA3,0xAF), align=PP_ALIGN.CENTER)
+        txt(s, name, Inches(0.4), Inches(3.8), Inches(9), Inches(0.45), 14, color=grey, italic=True)
+        txt(s, f"{days_ahead}-Day Strategy  ·  {month_str}", Inches(0.4), Inches(4.55), Inches(9), Inches(0.35), 12, color=RGBColor(0x4B,0x55,0x63))
 
 
         # Serialize + upload
