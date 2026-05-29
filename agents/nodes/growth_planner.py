@@ -171,10 +171,23 @@ def _build_ig_audit(
     avg_er       = analyst_report.get("avgEngagementRate", 0) or 0
     avg_reach    = analyst_report.get("avgReach", 0) or 0
     ig_connected = analyst_report.get("ig_connected", False)
+    profile_views_30d = (analyst_report.get("profileViews30d") or
+                         analyst_report.get("profile_views_30d") or 0)
 
-    # Override current follower count if user supplied one
+    # User-supplied current followers override takes priority
     if current_followers_override is not None and current_followers_override >= 0:
         followers = current_followers_override
+
+    # CRITICAL FIX: fall back to brand.igFollowers when live IG data is unavailable.
+    # Without this, followers=0 and every plan starts "0 → 400" which is nonsense.
+    if followers == 0 and brand:
+        stored = int(brand.get("igFollowers") or 0)
+        if stored > 0:
+            followers = stored
+
+    data_source = "live" if (ig_connected and followers > 0) else (
+        "stored" if (not ig_connected and followers > 0) else "estimate"
+    )
 
     # Classify posts as working / not working
     working     = []
@@ -209,7 +222,8 @@ def _build_ig_audit(
     current_followers = followers
     if follower_goal is not None and follower_goal > 0:
         goal_followers = follower_goal
-    elif ig_connected and followers > 0:
+    elif followers > 0:
+        # Use actual followers (live OR stored) for 10% auto-growth target
         goal_followers = max(followers + 100, int(followers * 1.1))
     else:
         kpi = (analyst_report.get("kpi_targets_90day") or {})
@@ -218,6 +232,7 @@ def _build_ig_audit(
 
     return {
         "ig_connected":     ig_connected,
+        "data_source":      data_source,
         "posts_analysed":   len(top_posts),
         "followers":        current_followers,
         "goal_followers":   goal_followers,
@@ -231,7 +246,7 @@ def _build_ig_audit(
         "total_likes_30d":  analyst_report.get("totalLikes30d", 0),
         "total_comments_30d": analyst_report.get("totalComments30d", 0),
         "impressions_30d":  analyst_report.get("impressions30d", 0),
-        "profile_views_30d": analyst_report.get("profileViews30d", 0),
+        "profile_views_30d": profile_views_30d,
     }
 
 
@@ -283,7 +298,7 @@ def _calculate_goal_feasibility(ig_audit: dict, days_ahead: int) -> dict:
 async def _generate_strategy(brand, brand_knowledge, analyst_report, research_data, competitor_data, ig_audit, days_ahead, feasibility: dict = None) -> dict:
     oai = _get_oai()
     if not oai:
-        return _fallback_strategy(brand, days_ahead)
+        return _fallback_strategy(brand, days_ahead, ig_audit)
 
     niche           = brand.get("niche", "")
     name            = brand.get("name", "brand")
@@ -430,8 +445,13 @@ async def _generate_strategy(brand, brand_knowledge, analyst_report, research_da
                         + f"cta_templates: list of 4 CTA templates that match {name}'s voice and {cta_style or tone}\n"
                         + f"what_works: list of 4 specific, data-backed insights about what content is performing well\n"
                         + f"what_to_stop: list of 3 specific things to stop or change based on performance data\n"
-                        + f"follower_plan: object with week1/week2/week3/week4 as realistic target follower counts "
-                        + f"(starting from {followers}, goal: {goal})\n"
+                        + (
+                            f"follower_plan: object with day5/day10/day15 as realistic follower milestones "
+                            f"(starting from {followers}, goal: {goal}). NEVER set any value below {followers}.\n"
+                            if days_ahead <= 21 else
+                            f"follower_plan: object with week1/week2/week3/week4 as realistic target follower counts "
+                            f"(starting from {followers}, goal: {goal}). NEVER set any value below {followers}.\n"
+                        )
                         + f"engagement_tactics: list of 4 specific engagement tactics for {niche} community\n"
                         + f"content_series_ideas: list of 3 recurring content series ideas specific to {name}/{niche}\n"
                         + f"hook_strategy: list of 5 hook templates engineered for {niche} retention "
@@ -457,7 +477,11 @@ async def _generate_strategy(brand, brand_knowledge, analyst_report, research_da
                         + f"current_performance (high/medium/low), growth_potential (high/medium/low), "
                         + f"recommended_frequency (e.g. '3x/week'), expected_impact (string, 1 sentence specific to {niche})\n"
                         + f"goal_strategy: object with narrative (2-3 sentences on HOW the goal will be reached), "
-                        + f"week_by_week_path (list of strings like 'Week 1: focus on Reels, target +{max(1, int((feasibility or {}).get('required_weekly_growth', 10))) if feasibility else 10} followers'), "
+                        + (
+                            f"week_by_week_path (list of strings like 'Day 5: first Reels batch live, target +{max(1, int((feasibility or {{}}).get('required_daily_growth', 3) * 5)) if feasibility else 10} followers'), "
+                            if days_ahead <= 21 else
+                            f"week_by_week_path (list of strings like 'Week 1: focus on Reels, target +{max(1, int((feasibility or {{}}).get('required_weekly_growth', 10))) if feasibility else 10} followers'), "
+                        )
                         + f"non_negotiable_actions (list of 3-5 must-do actions), risk_mitigation (list of 2-3 actions)\n"
                         + (
                             f"day_by_day_plan: list of {days_ahead} objects (one per day), each with day (int), "
@@ -484,7 +508,7 @@ async def _generate_strategy(brand, brand_knowledge, analyst_report, research_da
     except Exception as e:
         print(f"[GrowthPlanner] GPT strategy error: {e}")
         import traceback; traceback.print_exc()
-        return _fallback_strategy(brand, days_ahead)
+        return _fallback_strategy(brand, days_ahead, ig_audit)
 
 
 # ── Growth Planner PPT ───────────────────────────────────────────────────────
@@ -570,8 +594,11 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         bar(s, 0, 0, Inches(10), Inches(0.06), brand_color)
         txt(s, "01  ·  BRAND SNAPSHOT", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
         txt(s, "Where you stand today.", Inches(0.4), Inches(0.55), Inches(6), Inches(0.5), 20, bold=True)
+        data_source_label = ig_audit.get("data_source", "estimate")
         if ig_connected and followers > 0:
             mode_label = f"Live Instagram data  ·  {ig_audit.get('posts_analysed', 0)} posts analysed"
+        elif followers > 0:
+            mode_label = f"Stored data ({followers:,} followers)  ·  Connect IG for live metrics"
         else:
             mode_label = "Launch Mode  ·  Targets based on brand brief + market research (connect IG for live metrics)"
         txt(s, mode_label, Inches(0.4), Inches(0.95), Inches(9.2), Inches(0.3), 9, color=grey, italic=True)
@@ -585,12 +612,20 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
                 (ig_audit.get("best_content_type", "Reel"), "Best Format", RGBColor(0xF5,0x9E,0x0B)),
                 (str(ig_audit.get("posts_analysed", 0)), "Posts Analysed", white),
             ]
+        elif followers > 0:
+            snap_stats = [
+                (f"{followers:,}",  "Current Followers",  brand_color),
+                (f"{goal:,}",       f"{days_ahead}-Day Target", green),
+                (f"+{gap:,}",       "Followers Needed",   accent),
+                (f"{feas.get('probability_pct', 70)}%", "Goal Probability", RGBColor(0xF5,0x9E,0x0B)),
+                ("Stored Data",     "Data Source",        white),
+            ]
         else:
             kpi_fol   = int(kpi.get("followers", 500) or 500)
             kpi_er    = kpi.get("avg_engagement_rate", "3-5")
             kpi_reels = kpi.get("reels_per_week", 3)
             snap_stats = [
-                (f"{kpi_fol:,}",    "90-Day Follower Target",  brand_color),
+                (f"{kpi_fol:,}",    f"{days_ahead}-Day Target", brand_color),
                 (f"{kpi_er}%",      "Target Engagement Rate",  green),
                 (f"{kpi_reels}/wk", "Reels Cadence",           accent),
                 (f"{feas.get('probability_pct', 70)}%", "Goal Probability", RGBColor(0xF5,0x9E,0x0B)),
@@ -829,14 +864,28 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
                 txt(s, f"KPI: {str(wk.get('kpi_target',''))[:42]}", x + Inches(0.12), Inches(3.18), Inches(2.0), Inches(0.35), 9, color=wc)
         else:
             follower_plan = strategy.get("follower_plan") or {}
-            for i, (wk, label) in enumerate(zip(["week1","week2","week3","week4"], ["Week 1","Week 2","Week 3","Week 4"])):
-                val = follower_plan.get(wk, followers + int(gap / 4) * (i + 1))
-                wc  = [brand_color, green, accent, RGBColor(0xF5,0x9E,0x0B)][i]
-                x   = Inches(0.3 + i * 2.4)
-                bar(s, x, Inches(1.15), Inches(2.2), Inches(2.0), mid_dark)
-                bar(s, x, Inches(1.15), Inches(2.2), Inches(0.05), wc)
-                txt(s, label, x + Inches(0.12), Inches(1.24), Inches(2.0), Inches(0.32), 8, color=wc, bold=True)
-                txt(s, f"{val:,} followers", x + Inches(0.12), Inches(1.6), Inches(2.0), Inches(0.45), 14, bold=True, color=wc)
+            if days_ahead <= 21:
+                # Short plan: show Day 5 / Day 10 / Day 15 / Goal milestones
+                milestone_keys   = ["day5", "day10", "day15", "goal"]
+                milestone_labels = [f"Day 5", f"Day 10", f"Day 15", f"Day {days_ahead}"]
+                for i, (mk, label) in enumerate(zip(milestone_keys, milestone_labels)):
+                    fraction = (i + 1) / 4
+                    val = follower_plan.get(mk, followers + int(gap * fraction))
+                    wc  = [brand_color, green, accent, RGBColor(0xF5,0x9E,0x0B)][i]
+                    x   = Inches(0.3 + i * 2.4)
+                    bar(s, x, Inches(1.15), Inches(2.2), Inches(2.0), mid_dark)
+                    bar(s, x, Inches(1.15), Inches(2.2), Inches(0.05), wc)
+                    txt(s, label, x + Inches(0.12), Inches(1.24), Inches(2.0), Inches(0.32), 8, color=wc, bold=True)
+                    txt(s, f"{val:,} followers", x + Inches(0.12), Inches(1.6), Inches(2.0), Inches(0.45), 14, bold=True, color=wc)
+            else:
+                for i, (wk, label) in enumerate(zip(["week1","week2","week3","week4"], ["Week 1","Week 2","Week 3","Week 4"])):
+                    val = follower_plan.get(wk, followers + int(gap / 4) * (i + 1))
+                    wc  = [brand_color, green, accent, RGBColor(0xF5,0x9E,0x0B)][i]
+                    x   = Inches(0.3 + i * 2.4)
+                    bar(s, x, Inches(1.15), Inches(2.2), Inches(2.0), mid_dark)
+                    bar(s, x, Inches(1.15), Inches(2.2), Inches(0.05), wc)
+                    txt(s, label, x + Inches(0.12), Inches(1.24), Inches(2.0), Inches(0.32), 8, color=wc, bold=True)
+                    txt(s, f"{val:,} followers", x + Inches(0.12), Inches(1.6), Inches(2.0), Inches(0.45), 14, bold=True, color=wc)
             for j, t in enumerate((strategy.get("growth_tactics") or [])[:4]):
                 txt(s, f"• {t}", Inches(0.4), Inches(3.4 + j * 0.38), Inches(9.2), Inches(0.35), 10, color=light)
         footer(s, 9)
@@ -937,9 +986,12 @@ def _upload_bytes(data: bytes, path: str, content_type: str):
         return None
 
 
-def _fallback_strategy(brand: dict, days_ahead: int) -> dict:
+def _fallback_strategy(brand: dict, days_ahead: int, ig_audit: dict = None) -> dict:
     niche   = brand.get("niche", "your niche")
     name    = brand.get("name", "your brand")
+    _followers = (ig_audit or {}).get("followers", 0)
+    _goal      = (ig_audit or {}).get("goal_followers", 500)
+    _gap       = max(_goal - _followers, 0)
     content_pillars = brand.get("contentPillars") or []
     pillars = content_pillars[:4] if content_pillars else [
         "Brand Awareness", "Education & Value", "Engagement", "Social Proof"
@@ -980,7 +1032,12 @@ def _fallback_strategy(brand: dict, days_ahead: int) -> dict:
             "Overly promotional posts without value delivery",
             "Static images without text overlay or visual hook",
         ],
-        "follower_plan": {"week1": 0, "week2": 0, "week3": 0, "week4": 0},
+        "follower_plan": {
+            "week1": _followers + int(_gap * 0.25),
+            "week2": _followers + int(_gap * 0.50),
+            "week3": _followers + int(_gap * 0.75),
+            "week4": _goal,
+        },
         "engagement_tactics": [
             "Reply to every comment within 1 hour of posting",
             f"Engage daily in {niche} hashtag communities",
