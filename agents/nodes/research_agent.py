@@ -10,6 +10,7 @@ import os
 import httpx
 from openai import AsyncOpenAI
 from state import SocialOSState
+from skills.registry import JTBD_FRAMEWORK
 
 # Lazy singletons
 _oai = None
@@ -193,6 +194,13 @@ async def research_agent_node(state: SocialOSState, event_queue: asyncio.Queue) 
             "viral_formats":           synthesis.get("viral_formats", []),
             "niche":                   niche,
             "industry":                industry,
+            # JTBD customer research outputs
+            "jtbd_functional_jobs":    synthesis.get("jtbd_functional_jobs", []),
+            "jtbd_emotional_jobs":     synthesis.get("jtbd_emotional_jobs", []),
+            "jtbd_social_jobs":        synthesis.get("jtbd_social_jobs", []),
+            "trigger_events":          synthesis.get("trigger_events", []),
+            "exact_vocabulary":        synthesis.get("exact_vocabulary", []),
+            "pain_frequency_intensity":synthesis.get("pain_frequency_intensity", []),
         },
         "_message": (
             f"Research done — {len(synthesis.get('trending_angles', []))} angles, "
@@ -237,7 +245,8 @@ async def _synthesise_research(
                         f"You are a specialist Instagram content researcher for {name}, a {niche} brand. "
                         f"Your job is to synthesise raw research data into highly specific, actionable content insights "
                         f"that this brand can use immediately. Everything must be tailored to this brand's audience and voice. "
-                        f"Avoid generic advice — be specific to {niche} and {target_audience}."
+                        f"Avoid generic advice — be specific to {niche} and {target_audience}.\n\n"
+                        f"{JTBD_FRAMEWORK}"
                     ),
                 },
                 {
@@ -265,7 +274,19 @@ async def _synthesise_research(
                         f"youtube_shorts_angles: list of 3 specific YouTube Shorts angles trending in {niche} — "
                         f"each is a post idea adaptable to Reels\n"
                         f"viral_formats: list of 4 specific format names with a 1-sentence description "
-                        f"(e.g. 'POV transformation', 'Day-in-the-life with text overlays', 'Greenscreen reaction')"
+                        f"(e.g. 'POV transformation', 'Day-in-the-life with text overlays', 'Greenscreen reaction')\n"
+                        f"jtbd_functional_jobs: list of 3 specific 'I need to [verb] [object] so that [outcome]' "
+                        f"statements capturing what {target_audience or 'the audience'} is truly trying to accomplish\n"
+                        f"jtbd_emotional_jobs: list of 3 'current feeling → desired feeling' pairs for this audience "
+                        f"(e.g. 'overwhelmed by options → confident in their strategy')\n"
+                        f"jtbd_social_jobs: list of 2 'they want to be seen as X, they fear being seen as Y' statements\n"
+                        f"trigger_events: list of 4 specific events that force {target_audience or 'this audience'} "
+                        f"to seek help — the moment the status quo becomes unacceptable\n"
+                        f"exact_vocabulary: list of 10 exact words or short phrases the audience uses to describe "
+                        f"their own problems — use their language, not {niche} industry jargon\n"
+                        f"pain_frequency_intensity: list of 3 objects with keys: pain (the specific problem), "
+                        f"frequency (daily/weekly/monthly), intensity (catastrophic/serious/annoying), "
+                        f"content_priority (high/medium/low)"
                     ),
                 },
             ],

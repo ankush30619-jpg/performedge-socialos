@@ -13,6 +13,7 @@ import os
 from datetime import datetime, timedelta
 from openai import AsyncOpenAI
 from state import SocialOSState
+from skills.registry import BUYER_STAGES
 
 CONTENT_TYPES = ["Reel", "Carousel", "Graphic", "Story", "AI Reel"]
 
@@ -172,7 +173,8 @@ async def _generate_calendar(
         f"Your role: Create a {days_ahead}-day Instagram content calendar that feels 100% authentic to {name}. "
         f"Every topic must be specific to {niche} and resonate with {audience or 'the target audience'}. "
         f"NO generic topics — every post must have a clear, specific angle that only {name} can own. "
-        f"Draw from the brand's real positioning, differentiators, and voice."
+        f"Draw from the brand's real positioning, differentiators, and voice.\n\n"
+        f"{BUYER_STAGES}"
     )
 
     # ── User prompt: structured request ───────────────────────────────────
@@ -201,6 +203,8 @@ async def _generate_calendar(
         "  pillar: which content pillar this serves",
         "  copy_brief: 2-3 sentence creative brief for the copywriter including: specific angle/hook, key message to communicate, CTA suggestion, and any specific brand voice notes",
         "  visual_direction: 1 sentence describing the visual style or creative direction for this post",
+        "  buyer_stage: one of awareness / consideration / decision / implementation — which stage this post targets",
+        "  ice_score: object with keys impact (1-10), confidence (1-10), ease (1-10) — rough priority score for this post idea",
         "",
         f"Rules:",
         f"- Follow the content mix percentages strictly",
@@ -242,6 +246,8 @@ async def _generate_calendar(
                 "pillar":           p.get("pillar", pillars[i % len(pillars)]),
                 "copy_brief":       p.get("copy_brief", ""),
                 "visual_direction": p.get("visual_direction", ""),
+                "buyer_stage":      p.get("buyer_stage", "awareness"),
+                "ice_score":        p.get("ice_score", {}),
                 "status":           "draft",
             })
 

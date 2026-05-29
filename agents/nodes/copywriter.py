@@ -18,6 +18,7 @@ import json
 import os
 from openai import AsyncOpenAI
 from state import SocialOSState
+from skills.registry import PSYCHOLOGY_TRIGGERS, AIDA_STRUCTURE, HOOK_FORMULAS, SEVEN_SWEEPS
 
 BATCH_SIZE = 5
 
@@ -134,7 +135,13 @@ async def copywriter_node(state: SocialOSState, event_queue: asyncio.Queue) -> d
     voice_rules.append("- Mix: broad reach tags + niche community tags + brand-specific tags")
     voice_rules.append("- NO hashtag spam — all hashtags must be genuinely relevant to the post")
 
-    system_prompt = "\n".join(voice_rules)
+    system_prompt = (
+        "\n".join(voice_rules)
+        + "\n\n" + PSYCHOLOGY_TRIGGERS
+        + "\n\n" + AIDA_STRUCTURE
+        + "\n\n" + HOOK_FORMULAS
+        + "\n\n" + SEVEN_SWEEPS
+    )
 
     # ── Build hashtag pool string ──────────────────────────────────────────
     hashtag_pool_text = ""

@@ -13,6 +13,7 @@ import os
 import httpx
 from openai import AsyncOpenAI
 from state import SocialOSState
+from skills.registry import COMPETITOR_PROFILING
 
 # Lazy singletons
 _oai = None
@@ -129,7 +130,8 @@ async def competitor_tracker_node(state: SocialOSState, event_queue: asyncio.Que
         "_message": (
             f"Competitive intelligence ready — "
             f"{len(analysis.get('competitors_found', []))} competitors, "
-            f"{len(analysis.get('content_gaps', []))} gaps identified"
+            f"{len(analysis.get('content_gaps', []))} gaps, "
+            f"win strategy: {str(analysis.get('win_strategy', ''))[:60]}…"
         ),
     }
 
@@ -168,7 +170,8 @@ async def _deep_competitive_analysis(
                     "content": (
                         f"You are a strategic competitive intelligence analyst specialising in {niche} Instagram marketing. "
                         f"Your job is to give {name} a clear-eyed, deeply specific analysis of the competitive landscape "
-                        f"and actionable opportunities to win. Be specific about {niche} — no generic social media advice."
+                        f"and actionable opportunities to win. Be specific about {niche} — no generic social media advice.\n\n"
+                        f"{COMPETITOR_PROFILING}"
                     ),
                 },
                 {
@@ -193,7 +196,14 @@ async def _deep_competitive_analysis(
                         f"differentiation_strategy: string (2-3 sentences) explaining {name}'s unique content positioning "
                         f"vs competitors, based on the research\n"
                         f"content_formats_to_own: list of 3 specific content formats (e.g. 'weekly myth-busting carousel', "
-                        f"'day-in-the-life Reels', 'client results spotlight') that competitors underuse in {niche}"
+                        f"'day-in-the-life Reels', 'client results spotlight') that competitors underuse in {niche}\n"
+                        f"positioning_matrix: list of 3-4 objects, each with keys: brand (name), core_promise, "
+                        f"proof_method, target_segment, positioning_gap — use the POSITIONING MATRIX methodology\n"
+                        f"gap_opportunities: object with keys: topic_gap (most important unaddressed topic), "
+                        f"format_gap (effective format competitors avoid), audience_gap (sub-segment no one serves), "
+                        f"tone_gap (emotional register no one occupies) — be specific to {niche}\n"
+                        f"win_strategy: 2-3 sentences on the single clearest path for {name} to win attention "
+                        f"in the {niche} space based on the competitive gaps found"
                     ),
                 },
             ],
