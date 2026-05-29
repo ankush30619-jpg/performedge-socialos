@@ -119,6 +119,31 @@ async def competitor_tracker_node(state: SocialOSState, event_queue: asyncio.Que
         "message":  "Running deep competitive analysis with AI…",
     })
 
+    # ── Source tracking: surface the ACTUAL competitor sources analysed ──────
+    # Categorised by platform (Instagram / LinkedIn / Facebook / YouTube /
+    # Reviews / Articles) so the execution report is fully auditable.
+    from trace import categorize_sources
+    sources_analyzed = []
+    for r in all_data:
+        url = r.get("url") or ""
+        if url:
+            sources_analyzed.append({
+                "title": (r.get("title") or "")[:120],
+                "url":   url,
+            })
+    source_categories = categorize_sources(sources_analyzed)
+    await event_queue.put({
+        "type":     "agent_sources",
+        "agentKey": "competitorTracker",
+        "message":  f"Analysed {len(sources_analyzed)} competitor sources across {len(searches[:4])} searches",
+        "data": {
+            "search_queries":    searches[:4] + (searches[4:5] if comp_names else []),
+            "sources_analyzed":  sources_analyzed,
+            "source_categories": source_categories,
+            "platforms_checked": list(source_categories.keys()),
+        },
+    })
+
     # ── Deep GPT analysis ──────────────────────────────────────────────────
     analysis = await _deep_competitive_analysis(
         all_data, name, niche, industry, audience,

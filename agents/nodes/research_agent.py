@@ -164,6 +164,37 @@ async def research_agent_node(state: SocialOSState, event_queue: asyncio.Queue) 
         "message":  f"Research synthesis complete — {len(synthesis.get('trending_angles', []))} content angles identified",
     })
 
+    # ── Research visibility: surface the ACTUAL queries + URLs analysed ───────
+    # (truthful audit trail — no fabricated sources; only what was really hit)
+    executed_queries = [q1, q2, q3, q4, q5, q6, q7]
+    sources_analyzed = []
+    for r in all_results:
+        url = r.get("url") or ""
+        if url:
+            sources_analyzed.append({
+                "title":    (r.get("title") or "")[:120],
+                "url":      url,
+                "platform": "Web search (Tavily)",
+            })
+    for r in news_results:
+        src = r.get("source") if isinstance(r.get("source"), dict) else {}
+        sources_analyzed.append({
+            "title":    (r.get("title") or "")[:120],
+            "url":      r.get("url") or "",
+            "platform": f"News — {src.get('name', 'NewsAPI')}",
+        })
+    platforms_checked = ["Instagram", "TikTok", "YouTube Shorts", "News (NewsAPI)"]
+    await event_queue.put({
+        "type":     "agent_sources",
+        "agentKey": "researchAgent",
+        "message":  f"Analysed {len(sources_analyzed)} sources across {len(executed_queries)} searches + news",
+        "data": {
+            "search_queries":    executed_queries,
+            "sources_analyzed":  sources_analyzed,
+            "platforms_checked": platforms_checked,
+        },
+    })
+
     # Slim raw results for state (save tokens)
     def slim(items):
         return [

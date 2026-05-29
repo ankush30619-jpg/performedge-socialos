@@ -106,3 +106,99 @@ export const AGENT_PRODUCES: Record<string, string> = {
   copywriter:        "Hooks · Captions · CTAs · Hashtags · SEO keywords · Scripts · Slides · Layouts",
   designer:          "AI-generated images · Downloadable Excel calendar · Downloadable PPT deck",
 };
+
+// ── Rich agent metadata — powers the "before run" Agent Information Panel ──────
+// Each entry explains what the agent is, why it exists, and how to judge success.
+export interface AgentMeta {
+  purpose: string;
+  objective: string;
+  inputs: string[];
+  outputs: string[];
+  tools: string[];
+  dataSources: string[];
+  dependencies: string[];
+  successCriteria: string[];
+}
+
+export const AGENT_METADATA: Record<string, AgentMeta> = {
+  brandManager: {
+    purpose: "Load and structure everything the platform knows about your brand.",
+    objective: "Decrypt the Instagram access token server-side and assemble a rich brand-knowledge context block (positioning, voice, pillars, audience) that every downstream agent reuses.",
+    inputs: ["Brand profile from database", "Encrypted Instagram token", "Brand guidelines & media URLs"],
+    outputs: ["Brand knowledge context block", "Decrypted IG token (server-side only)"],
+    tools: ["Prisma / Supabase", "AES-256-GCM token decryption", "GPT-4o-mini (context synthesis)"],
+    dataSources: ["Brand Hub profile", "Uploaded brand guidelines"],
+    dependencies: ["None — runs first"],
+    successCriteria: ["Brand context block built", "IG token decrypted (if connected)", "All downstream agents receive consistent brand data"],
+  },
+  analyst: {
+    purpose: "Measure real Instagram performance and turn the numbers into insight.",
+    objective: "Call the Meta Graph API for live followers, engagement, reach and top posts, then interpret the data into strengths, opportunities and benchmarks.",
+    inputs: ["Decrypted IG token", "IG account ID", "Brand knowledge context"],
+    outputs: ["Follower count", "Avg engagement rate", "Avg reach", "Top 10 posts", "Content opportunities"],
+    tools: ["Meta Graph API v21.0", "GPT-4o-mini (insight synthesis)"],
+    dataSources: ["Instagram Business account insights", "Recent media (last 20 posts)"],
+    dependencies: ["Brand Manager"],
+    successCriteria: ["Live metrics fetched (or labelled baseline if no IG)", "Top posts ranked by engagement", "No fabricated metrics when IG is disconnected"],
+  },
+  researchAgent: {
+    purpose: "Discover what is working RIGHT NOW in your niche across the web.",
+    objective: "Run 7 targeted searches plus a news query, then synthesise findings into brand-specific content angles, audience pain insights and a hashtag strategy.",
+    inputs: ["Niche & industry", "Target audience & pain points", "Content pillars"],
+    outputs: ["Trending content angles", "Audience pain insights", "Hook ideas", "25+ hashtags", "Viral formats"],
+    tools: ["Tavily Search API", "NewsAPI", "GPT-4o-mini (synthesis)"],
+    dataSources: ["Web (Instagram, TikTok, YouTube Shorts trends)", "Recent news articles"],
+    dependencies: ["Brand Manager"],
+    successCriteria: ["7 searches executed", "Sources captured for audit", "Angles specific to the niche (not generic)"],
+  },
+  competitorTracker: {
+    purpose: "Analyze competitors in the market and find where you can win.",
+    objective: "Identify positioning, strengths, weaknesses, content strategy and gaps, then produce concrete differentiation opportunities.",
+    inputs: ["Known competitors list", "Niche & positioning", "Brand differentiation"],
+    outputs: ["Competitor content breakdown", "Their strengths & weaknesses", "Content gaps to fill", "Differentiation strategy"],
+    tools: ["Tavily Search API", "GPT-4o-mini (competitive analysis)"],
+    dataSources: ["Competitor websites", "Instagram / LinkedIn / Facebook / YouTube pages", "Reviews & articles"],
+    dependencies: ["Brand Manager"],
+    successCriteria: ["Real competitors identified", "Sources categorised by platform", "Gaps tied to the brand's positioning"],
+  },
+  growthPlanner: {
+    purpose: "Turn data + research into a measurable follower-growth roadmap.",
+    objective: "Audit Instagram history, run the goal-feasibility math, validate every number, and generate a consultant-grade growth strategy deck.",
+    inputs: ["Analyst report", "Research data", "Competitor data", "Current followers & goal", "Plan duration"],
+    outputs: ["Growth roadmap", "Goal feasibility math", "KPI targets", "Content mix %", "Strategy PPT"],
+    tools: ["GPT-4o-mini (strategy)", "python-pptx", "Quality-check validator", "Supabase Storage"],
+    dataSources: ["Analyst metrics", "Research Agent output", "Competitor Tracker output"],
+    dependencies: ["Brand Manager", "Analyst", "Research Agent", "Competitor Tracker"],
+    successCriteria: ["Goal math verified & consistent", "No fabricated statistics", "Plan duration honoured", "Low-confidence figures labelled Estimate/Assumption"],
+  },
+  strategist: {
+    purpose: "Lay out exactly what to post, every day.",
+    objective: "Build the day-by-day content calendar using the brand brief, pillars, research trends and competitor gaps.",
+    inputs: ["Growth strategy", "Content pillars", "Research trends", "Competitor gaps"],
+    outputs: ["Content calendar (1 post/day)", "Topic per post", "Content type", "Visual direction", "Posting time"],
+    tools: ["GPT-4o-mini (calendar generation)"],
+    dataSources: ["Growth Planner strategy", "Research & competitor insights"],
+    dependencies: ["Growth Planner"],
+    successCriteria: ["One post per day for the full window", "Each post mapped to a pillar", "Variety across content types"],
+  },
+  copywriter: {
+    purpose: "Write production-ready copy for every planned post.",
+    objective: "Produce hooks, captions, CTAs, hashtags and type-specific content (Reel scripts, carousel slides, story frames) in the brand voice.",
+    inputs: ["Content calendar", "Brand voice & hook style", "Research hooks & hashtags"],
+    outputs: ["3 hook variations", "Short & long captions", "CTA", "20–30 hashtags", "Scripts / slides / frames"],
+    tools: ["GPT-4o-mini (copywriting)"],
+    dataSources: ["Strategist calendar", "Brand voice profile"],
+    dependencies: ["Strategist"],
+    successCriteria: ["Every post has complete copy", "Voice matches the brand", "Type-specific content present"],
+  },
+  designer: {
+    purpose: "Create the visuals and the final deliverable files.",
+    objective: "Generate images for visual posts, build the styled Excel content calendar, and render the final PowerPoint.",
+    inputs: ["Post briefs & copy", "Brand colours & logo", "Visual direction per post"],
+    outputs: ["AI-generated images", "Excel content calendar", "PowerPoint deck"],
+    tools: ["Freepik Mystic AI", "openpyxl (Excel)", "python-pptx", "Supabase Storage"],
+    dataSources: ["Copywriter briefs", "Brand identity assets"],
+    dependencies: ["Copywriter"],
+    successCriteria: ["Images generated for visual posts", "Excel & PPT uploaded", "Files traceable to source data"],
+  },
+};

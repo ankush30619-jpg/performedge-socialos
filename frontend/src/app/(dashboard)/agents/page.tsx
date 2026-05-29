@@ -7,14 +7,15 @@ import { GlassCard } from "@/components/ui/GlassCard";
 import { AgentNode } from "@/components/ui/AgentNode";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { AGENT_LABELS, AGENT_ICONS, AGENT_DESCRIPTIONS, AGENT_PRODUCES } from "@/lib/utils";
+import { AGENT_LABELS, AGENT_ICONS, AGENT_DESCRIPTIONS, AGENT_PRODUCES, AGENT_METADATA } from "@/lib/utils";
 import {
   Play, StopCircle, Download, ChevronDown, ChevronUp, Terminal,
   Clock, CheckCircle2, Layers, FileText, Presentation,
   Calendar, Paintbrush, RefreshCw, Target, TrendingUp,
+  Search, Link2, Globe, Users, ListChecks, FileSearch,
 } from "lucide-react";
 import Link from "next/link";
-import type { SSEEvent, AgentRun } from "@/types";
+import type { SSEEvent, AgentRun, AgentExecution } from "@/types";
 
 const AGENT_ORDER = [
   "brandManager",
@@ -40,7 +41,7 @@ const AGENT_TIMES: Record<string, number> = {
 };
 const TOTAL_EST = Object.values(AGENT_TIMES).reduce((a, b) => a + b, 0);
 
-type AgentStatuses = Record<string, { status: string; message?: string }>;
+type AgentStatuses = Record<string, AgentExecution>;
 
 export default function AgentsPage() {
   const activeBrand = useActiveBrand();
@@ -115,9 +116,18 @@ export default function AgentsPage() {
           if (timerRef.current) clearInterval(timerRef.current);
           refetchRuns();
         }
-        // Update agent statuses from DB if we have them
+        // Update agent statuses from DB if we have them. Deep-merge per agent
+        // so DB-side execution traces (steps/sources/files) survive even when
+        // a live status object exists in `prev`.
         if (run.agentStatuses && Object.keys(run.agentStatuses).length > 0) {
-          setAgentStatuses(prev => ({ ...run.agentStatuses as AgentStatuses, ...prev }));
+          const dbStatuses = run.agentStatuses as AgentStatuses;
+          setAgentStatuses(prev => {
+            const merged: AgentStatuses = { ...prev };
+            for (const [k, v] of Object.entries(dbStatuses)) {
+              merged[k] = { ...(prev[k] ?? {}), ...v };
+            }
+            return merged;
+          });
         }
       } catch {
         // ignore poll errors
@@ -186,6 +196,18 @@ export default function AgentsPage() {
               [e.agentKey!]: { status: "failed", message: e.message },
             }));
           } else if (e.type === "pipeline_complete") {
+            // Merge the full execution traces (timing, steps, sources, files)
+            // that the agents service aggregated into agentStatuses.
+            const finalStatuses = e.data?.agentStatuses as AgentStatuses | undefined;
+            if (finalStatuses && Object.keys(finalStatuses).length > 0) {
+              setAgentStatuses((prev) => {
+                const merged: AgentStatuses = { ...prev };
+                for (const [k, v] of Object.entries(finalStatuses)) {
+                  merged[k] = { ...(prev[k] ?? {}), ...v };
+                }
+                return merged;
+              });
+            }
             // Update activeRun with final outputs (use ref to avoid stale closure)
             const current = activeRunRef.current;
             const finalPptUrl   = (e.data?.pptUrl as string | undefined)    ?? current?.pptUrl;
@@ -760,22 +782,70 @@ function FollowerGoalCalculator({
 
 type AgentStatusVal = "pending" | "running" | "completed" | "failed" | "skipped";
 
+function fmtDuration(ms?: number | null): string {
+  if (ms == null || ms < 0) return "—";
+  if (ms < 1000) return `${ms}ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  return `${m}m ${Math.round(s % 60)}s`;
+}
+
+function fmtClock(iso?: string): string {
+  if (!iso) return "—";
+  try { return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
+  catch { return "—"; }
+}
+
+function MetaRow({ icon, title, items }: { icon: React.ReactNode; title: string; items: string[] }) {
+  if (!items?.length) return null;
+  return (
+    <div>
+      <div className="flex items-center gap-1.5 mb-2">
+        <span className="text-white/40">{icon}</span>
+        <p className="text-[10px] font-semibold text-white/40 uppercase tracking-widest">{title}</p>
+      </div>
+      <ul className="space-y-1">
+        {items.map((it, i) => (
+          <li key={i} className="text-[13px] text-white/70 leading-relaxed flex gap-2">
+            <span className="text-brand-light/60 mt-1.5 w-1 h-1 rounded-full bg-brand-light/50 flex-shrink-0" />
+            <span>{it}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function AgentDetailModal({
   agentKey,
   agentStatuses,
   onClose,
 }: {
   agentKey: string;
-  agentStatuses: Record<string, { status: string; message?: string }>;
+  agentStatuses: AgentStatuses;
   onClose: () => void;
 }) {
   const label       = AGENT_LABELS[agentKey]       ?? agentKey;
   const icon        = AGENT_ICONS[agentKey]        ?? "🤖";
   const description = AGENT_DESCRIPTIONS[agentKey] ?? "";
   const produces    = AGENT_PRODUCES[agentKey]     ?? "";
+  const meta        = AGENT_METADATA[agentKey];
   const agentData   = agentStatuses[agentKey];
   const status      = (agentData?.status ?? "pending") as AgentStatusVal;
   const message     = agentData?.message;
+
+  const steps     = agentData?.steps ?? [];
+  const queries   = agentData?.search_queries ?? [];
+  const sources   = agentData?.sources_analyzed ?? [];
+  const cats      = agentData?.source_categories ?? {};
+  const platforms = agentData?.platforms_checked ?? [];
+  const files     = agentData?.files_generated ?? [];
+
+  // "After run" view is shown once the agent has actually executed.
+  const hasExecution =
+    status === "completed" || status === "failed" ||
+    steps.length > 0 || !!agentData?.startedAt;
 
   const STATUS_BG: Record<AgentStatusVal, string> = {
     pending:   "bg-white/[0.06] text-white/40",
@@ -784,52 +854,253 @@ function AgentDetailModal({
     failed:    "bg-red-500/10 text-red-400 border border-red-500/20",
     skipped:   "bg-white/[0.04] text-white/30",
   };
-
   const STATUS_LABEL: Record<AgentStatusVal, string> = {
     pending: "Pending", running: "Running", completed: "Completed",
     failed: "Failed",   skipped: "Skipped",
   };
 
+  const sectionLabel = "text-[10px] font-semibold text-white/40 uppercase tracking-widest";
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-md mx-4 rounded-2xl border border-white/[0.08] bg-[#0f1117] p-6 shadow-2xl"
+        className="relative w-full max-w-2xl rounded-2xl border border-white/[0.08] bg-[#0f1117] shadow-2xl max-h-[88vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start gap-3 mb-5">
+        {/* Header */}
+        <div className="flex items-start gap-3 p-6 pb-4 border-b border-white/[0.06]">
           <span className="text-3xl leading-none mt-0.5">{icon}</span>
           <div className="flex-1 min-w-0">
             <h2 className="text-lg font-semibold text-white">{label}</h2>
-            <span className={`inline-block mt-1 text-[11px] font-medium px-2 py-0.5 rounded-full ${STATUS_BG[status]}`}>
-              {STATUS_LABEL[status]}
-            </span>
+            <div className="flex items-center gap-2 mt-1">
+              <span className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full ${STATUS_BG[status]}`}>
+                {STATUS_LABEL[status]}
+              </span>
+              <span className="text-[10px] text-white/30">
+                {hasExecution ? "Execution report" : "Agent information"}
+              </span>
+            </div>
           </div>
           <button onClick={onClose} className="text-white/30 hover:text-white/70 transition text-xl leading-none mt-0.5">✕</button>
         </div>
 
-        {message && (
-          <div className="mb-4 px-3 py-2.5 rounded-lg bg-white/[0.04] border border-white/[0.06]">
-            <p className="text-xs text-white/60 leading-relaxed">{message}</p>
-          </div>
-        )}
+        <div className="overflow-y-auto p-6 space-y-6">
+          {message && (
+            <div className="px-3 py-2.5 rounded-lg bg-white/[0.04] border border-white/[0.06]">
+              <p className="text-xs text-white/60 leading-relaxed">{message}</p>
+            </div>
+          )}
 
-        <div className="mb-5">
-          <p className="text-[10px] font-semibold text-white/30 uppercase tracking-widest mb-2">What it does</p>
-          <p className="text-sm text-white/65 leading-relaxed">{description}</p>
-        </div>
+          {!hasExecution ? (
+            /* ───────────── BEFORE RUN — Agent Information Panel ───────────── */
+            <>
+              {meta ? (
+                <>
+                  <div className="grid sm:grid-cols-2 gap-5">
+                    <div>
+                      <p className={sectionLabel + " mb-2"}>Purpose</p>
+                      <p className="text-[13px] text-white/70 leading-relaxed">{meta.purpose}</p>
+                    </div>
+                    <div>
+                      <p className={sectionLabel + " mb-2"}>Objective</p>
+                      <p className="text-[13px] text-white/70 leading-relaxed">{meta.objective}</p>
+                    </div>
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-x-6 gap-y-5">
+                    <MetaRow icon={<FileText className="w-3.5 h-3.5" />}   title="Inputs Required"   items={meta.inputs} />
+                    <MetaRow icon={<CheckCircle2 className="w-3.5 h-3.5" />} title="Expected Outputs" items={meta.outputs} />
+                    <MetaRow icon={<Layers className="w-3.5 h-3.5" />}     title="Tools Used"        items={meta.tools} />
+                    <MetaRow icon={<Globe className="w-3.5 h-3.5" />}      title="Data Sources"      items={meta.dataSources} />
+                    <MetaRow icon={<Target className="w-3.5 h-3.5" />}     title="Dependencies"      items={meta.dependencies} />
+                    <MetaRow icon={<ListChecks className="w-3.5 h-3.5" />} title="Success Criteria"  items={meta.successCriteria} />
+                  </div>
+                </>
+              ) : (
+                <div>
+                  <p className={sectionLabel + " mb-2"}>What it does</p>
+                  <p className="text-sm text-white/65 leading-relaxed">{description}</p>
+                </div>
+              )}
 
-        <div>
-          <p className="text-[10px] font-semibold text-white/30 uppercase tracking-widest mb-2">Produces</p>
-          <div className="flex flex-wrap gap-1.5">
-            {produces.split(" · ").map((item) => (
-              <span key={item} className="text-[11px] px-2.5 py-1 rounded-full bg-brand/10 border border-brand/20 text-brand-light">
-                {item}
-              </span>
-            ))}
-          </div>
+              {produces && (
+                <div>
+                  <p className={sectionLabel + " mb-2"}>Produces</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {produces.split(" · ").map((item) => (
+                      <span key={item} className="text-[11px] px-2.5 py-1 rounded-full bg-brand/10 border border-brand/20 text-brand-light">
+                        {item}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            /* ───────────── AFTER RUN — Execution Report ───────────── */
+            <>
+              {/* Execution summary */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {[
+                  { label: "Status",   value: STATUS_LABEL[status] },
+                  { label: "Start",    value: fmtClock(agentData?.startedAt) },
+                  { label: "End",      value: fmtClock(agentData?.completedAt) },
+                  { label: "Duration", value: fmtDuration(agentData?.durationMs) },
+                ].map(({ label: l, value }) => (
+                  <div key={l} className="p-2.5 rounded-xl bg-white/[0.04] border border-white/[0.06]">
+                    <p className="text-[9px] text-white/30 uppercase tracking-wider">{l}</p>
+                    <p className="text-[13px] font-semibold text-white mt-0.5 truncate">{value}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Execution timeline */}
+              {steps.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-1.5 mb-3">
+                    <Clock className="w-3.5 h-3.5 text-white/40" />
+                    <p className={sectionLabel}>Execution Timeline</p>
+                  </div>
+                  <ol className="relative border-l border-white/[0.08] ml-1.5 space-y-3">
+                    {steps.map((st, i) => (
+                      <li key={i} className="ml-4">
+                        <span className="absolute -left-[5px] mt-1.5 w-2 h-2 rounded-full bg-brand-light/70" />
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="text-[13px] text-white/75 leading-snug">
+                            <span className="text-white/35 mr-1.5">Step {i + 1}:</span>{st.label}
+                          </p>
+                          {st.timestamp && <span className="text-[10px] text-white/25 whitespace-nowrap mt-0.5">{fmtClock(st.timestamp)}</span>}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+
+              {/* Research visibility — queries */}
+              {queries.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Search className="w-3.5 h-3.5 text-white/40" />
+                    <p className={sectionLabel}>Search Queries Used</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    {queries.map((q, i) => (
+                      <div key={i} className="text-[12px] text-white/65 px-2.5 py-1.5 rounded-lg bg-white/[0.03] border border-white/[0.05] font-mono leading-snug">
+                        {q}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Platforms checked */}
+              {platforms.length > 0 && (
+                <div>
+                  <p className={sectionLabel + " mb-2"}>Platforms Checked</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {platforms.map((p) => (
+                      <span key={p} className="text-[11px] px-2.5 py-1 rounded-full bg-white/[0.05] border border-white/[0.08] text-white/60">{p}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Source tracking — categorised (competitor analysis) */}
+              {Object.keys(cats).length > 0 && (
+                <div>
+                  <div className="flex items-center gap-1.5 mb-3">
+                    <Users className="w-3.5 h-3.5 text-white/40" />
+                    <p className={sectionLabel}>Sources Analyzed by Platform</p>
+                  </div>
+                  <div className="space-y-3">
+                    {Object.entries(cats).map(([cat, list]) => (
+                      <div key={cat}>
+                        <p className="text-[11px] font-medium text-white/55 mb-1">{cat} <span className="text-white/30">({list.length})</span></p>
+                        <div className="space-y-1">
+                          {list.slice(0, 8).map((s, i) => (
+                            <a key={i} href={s.url} target="_blank" rel="noopener noreferrer"
+                               className="block text-[11px] text-brand-light/80 hover:text-brand-light truncate">
+                              {s.title || s.url}
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Research visibility — flat URL list (when not categorised) */}
+              {Object.keys(cats).length === 0 && sources.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Link2 className="w-3.5 h-3.5 text-white/40" />
+                    <p className={sectionLabel}>URLs Analyzed ({sources.length})</p>
+                  </div>
+                  <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
+                    {sources.map((s, i) => (
+                      <a key={i} href={s.url} target="_blank" rel="noopener noreferrer"
+                         className="block text-[11px] text-brand-light/80 hover:text-brand-light truncate">
+                        {s.title || s.url}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* File traceability */}
+              {files.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-1.5 mb-3">
+                    <FileSearch className="w-3.5 h-3.5 text-white/40" />
+                    <p className={sectionLabel}>Files Generated & Provenance</p>
+                  </div>
+                  <div className="space-y-3">
+                    {files.map((f, i) => (
+                      <div key={i} className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <FileText className="w-4 h-4 text-brand-light" />
+                          <p className="text-[13px] font-medium text-white">{f.name}</p>
+                          {f.data_confidence && (
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${
+                              f.data_confidence === "high" ? "bg-emerald-500/10 text-emerald-400"
+                              : f.data_confidence === "medium" ? "bg-yellow-500/10 text-yellow-400"
+                              : "bg-red-500/10 text-red-400"}`}>
+                              {f.data_confidence} confidence
+                            </span>
+                          )}
+                        </div>
+                        {f.type && <p className="text-[11px] text-white/40 mb-2">{f.type}</p>}
+                        {f.produced_from && f.produced_from.length > 0 && (
+                          <>
+                            <p className="text-[10px] text-white/30 uppercase tracking-wider mb-1">Built from</p>
+                            <ul className="space-y-0.5">
+                              {f.produced_from.map((p, j) => (
+                                <li key={j} className="text-[11px] text-white/60 flex gap-1.5">
+                                  <span className="text-white/25">→</span><span>{p}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Static reference (what this agent does) for context */}
+              {description && (
+                <div className="pt-2 border-t border-white/[0.06]">
+                  <p className={sectionLabel + " mb-2"}>About this agent</p>
+                  <p className="text-[13px] text-white/55 leading-relaxed">{description}</p>
+                </div>
+              )}
+            </>
+          )}
         </div>
       </div>
     </div>

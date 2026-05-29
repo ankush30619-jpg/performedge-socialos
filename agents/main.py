@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 from state import SocialOSState
 from pipeline import build_pipeline
+from trace import TracingEventQueue
 
 # ── In-memory run state store (replace with Redis in production) ──────────────
 # run_id -> { state, event_queue, task }
@@ -81,8 +82,9 @@ async def start_run(req: RunRequest):
         else:
             return {"message": "Run already in progress", "runId": run_id}
 
-    # Create SSE event queue
-    event_queue: asyncio.Queue = asyncio.Queue()
+    # Create SSE event queue (TracingEventQueue records every event for the
+    # per-agent execution audit trail — see trace.py)
+    event_queue = TracingEventQueue()
 
     # Build initial state — use brand passed from backend (includes decrypted igAccessToken)
     initial_state: SocialOSState = {
@@ -139,6 +141,23 @@ async def start_run(req: RunRequest):
             else:
                 pipeline = build_pipeline(event_queue)
                 final_state = await pipeline.ainvoke(initial_state)
+
+            # ── Merge execution traces into agent_statuses ───────────────────
+            # Every event that flowed through the run is aggregated per-agent
+            # (timing, step timeline, research sources, files produced) and
+            # folded into the existing agentStatuses JSON so the frontend gets
+            # a complete, auditable execution report with no schema change.
+            try:
+                traces = event_queue.build_traces()
+                merged_statuses = dict(final_state.get("agent_statuses") or {})
+                for agent_key, trace in traces.items():
+                    existing = dict(merged_statuses.get(agent_key) or {})
+                    existing.setdefault("status", trace.get("status", "completed"))
+                    existing.update(trace)
+                    merged_statuses[agent_key] = existing
+                final_state["agent_statuses"] = merged_statuses
+            except Exception as trace_err:
+                print(f"[Pipeline] Trace aggregation error (non-fatal): {trace_err}")
 
             # Signal completion
             await event_queue.put({

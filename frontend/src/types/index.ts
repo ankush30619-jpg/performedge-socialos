@@ -98,6 +98,45 @@ export interface Brand {
   updatedAt?: string;
 }
 
+// ── Agent Execution Trace (audit trail) ───────────
+export interface TracedSource {
+  title?: string;
+  url?: string;
+  platform?: string;
+}
+
+export interface TracedStep {
+  label: string;
+  timestamp?: string;
+  type?: string;
+}
+
+export interface TracedFile {
+  name?: string;
+  url?: string;
+  type?: string;
+  generated_by?: string;
+  data_confidence?: string;
+  produced_from?: string[];
+  quality_checks?: string[];
+}
+
+export interface AgentExecution {
+  status: AgentStatusValue;
+  message?: string;
+  // Execution trace — populated after a run completes (see agents/trace.py)
+  startedAt?: string;
+  completedAt?: string;
+  durationMs?: number | null;
+  steps?: TracedStep[];
+  search_queries?: string[];
+  sources_analyzed?: TracedSource[];
+  source_categories?: Record<string, TracedSource[]>;
+  platforms_checked?: string[];
+  documents_read?: string[];
+  files_generated?: TracedFile[];
+}
+
 // ── Agent Run ────────────────────────────────────
 export interface AgentRun {
   id: string;
@@ -106,7 +145,7 @@ export interface AgentRun {
   status: RunStatus;
   mode: string;
   daysAhead: number;
-  agentStatuses: Record<string, { status: AgentStatusValue; message?: string }>;
+  agentStatuses: Record<string, AgentExecution>;
   pptUrl?: string;
   excelUrl?: string;
   postsGenerated: number;

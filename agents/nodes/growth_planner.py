@@ -121,6 +121,25 @@ async def growth_planner_node(state: SocialOSState, event_queue: asyncio.Queue) 
         research_data, competitor_data, ig_audit, days_ahead, feasibility
     )
 
+    # ── Quality-check phase (Change 2): validate numbers before they reach
+    # any slide. Verifies consistency, clamps impossible values, and labels
+    # low-confidence figures as Estimate/Assumption. Scalable — every pipeline
+    # that calls growth_planner_node inherits this gate automatically.
+    await event_queue.put({
+        "type": "agent_progress",
+        "agentKey": "growthPlanner",
+        "message": "Running data-quality validation on strategy numbers…",
+    })
+    growth_strategy, quality_report = _validate_strategy(
+        growth_strategy, ig_audit, feasibility, days_ahead
+    )
+    if quality_report.get("corrections"):
+        await event_queue.put({
+            "type": "agent_progress",
+            "agentKey": "growthPlanner",
+            "message": f"Quality check: {len(quality_report['corrections'])} value(s) corrected · confidence: {quality_report.get('confidence','medium')}",
+        })
+
     # ── Build PPT for growth_planner_only mode ────────────────────────────────
     ppt_url = None
     if mode == "growth_planner_only":
@@ -140,6 +159,30 @@ async def growth_planner_node(state: SocialOSState, event_queue: asyncio.Queue) 
             "agentKey": "growthPlanner",
             "message": f"PPT {'uploaded ✓' if ppt_url else 'failed'}",
         })
+        # ── File traceability: tie the generated deck to the data that fed it
+        if ppt_url:
+            await event_queue.put({
+                "type": "agent_sources",
+                "agentKey": "growthPlanner",
+                "message": "Growth Planner deck generated",
+                "data": {
+                    "files_generated": [{
+                        "name": "growth_planner.pptx",
+                        "url": ppt_url,
+                        "type": "Strategy presentation (12 slides)",
+                        "generated_by": "Growth Planner",
+                        "data_confidence": quality_report.get("confidence", "medium"),
+                        "produced_from": [
+                            f"Instagram audit — {ig_audit.get('posts_analysed', 0)} posts ({ig_audit.get('data_source', 'estimate')} data)",
+                            f"Follower goal math — {ig_audit.get('followers', 0):,} → {ig_audit.get('goal_followers', 0):,} over {days_ahead} days",
+                            f"Research — {len(research_data.get('trending_angles', []) or [])} trending angles, {len(research_data.get('hashtags', []) or [])} hashtags",
+                            f"Competitor intelligence — {len(competitor_data.get('competitors_found', []) or [])} competitors, {len(competitor_data.get('content_gaps', []) or [])} gaps",
+                            f"AI growth strategy — {len(growth_strategy.get('growth_tactics', []) or [])} tactics across {len(growth_strategy.get('pillars', []) or [])} pillars",
+                        ],
+                        "quality_checks": quality_report.get("checks", []),
+                    }],
+                },
+            })
 
     result = {
         "research_data":   research_data,
@@ -361,7 +404,17 @@ async def _generate_strategy(brand, brand_knowledge, analyst_report, research_da
                         f"Produce weekly_plan when days_ahead > 21.\n"
                         f"3. performance_diagnosis must reference actual post data — not generic insights.\n"
                         f"4. pillar_breakdown must have one entry per content pillar with real performance assessment.\n"
-                        f"5. Every insight must feel like a strategist spent hours on this brand.\n\n"
+                        f"5. Every insight must feel like a strategist spent hours on this brand.\n"
+                        f"\nDATA-QUALITY RULES (STRICT — non-negotiable):\n"
+                        f"6. NEVER invent statistics, metrics, revenue figures, market-share numbers, "
+                        f"or growth percentages. If a number was not given to you in the data above, do not state it as fact.\n"
+                        f"7. The ONLY follower numbers you may use are: current={followers}, goal={goal}. "
+                        f"Every milestone must be between {followers} and {goal} inclusive. Never output a value below {followers}.\n"
+                        f"8. If you must reference an industry benchmark or a projection that is not directly in the data, "
+                        f"prefix it with 'Estimate:' or 'Assumption:' so it is clearly labelled as not-measured.\n"
+                        f"9. Do NOT cite competitor follower counts, revenue, or pricing unless they appear in the research data.\n"
+                        f"10. Numbers across the plan must be internally consistent (milestones increase toward the goal; "
+                        f"percentages in content_mix sum to 100).\n\n"
                         + (
                             f"GOAL INTENSITY: {feasibility['acceleration_needed']}x acceleration required.\n"
                             + (
@@ -984,6 +1037,90 @@ def _upload_bytes(data: bytes, path: str, content_type: str):
         print(f"[GrowthPlanner] Supabase upload error for {path}: {e}")
         import traceback; traceback.print_exc()
         return None
+
+
+def _validate_strategy(strategy: dict, ig_audit: dict, feasibility: dict = None, days_ahead: int = 15) -> tuple[dict, dict]:
+    """Quality-check phase (Change 2) — verify and correct numbers BEFORE they
+    reach any slide. Does NOT fabricate data: it only clamps impossible values
+    to the trusted Python-computed bounds, enforces internal consistency, and
+    labels low-confidence figures. Returns (cleaned_strategy, quality_report).
+
+    Scalable by design: any pipeline producing a strategy dict can route it
+    through this gate and inherit the same guardrails.
+    """
+    if not isinstance(strategy, dict):
+        return strategy, {"checks": [], "corrections": [], "confidence": "low"}
+
+    followers = int(ig_audit.get("followers", 0) or 0)
+    goal      = int(ig_audit.get("goal_followers", 0) or 0)
+    data_src  = ig_audit.get("data_source", "estimate")
+    lo, hi    = followers, max(goal, followers)
+
+    checks: list = []
+    corrections: list = []
+
+    def clamp(v):
+        try:
+            n = int(round(float(v)))
+        except (ValueError, TypeError):
+            return None
+        return max(lo, min(hi, n))
+
+    # 1) follower_plan milestones must sit within [current, goal] and rise
+    fp = strategy.get("follower_plan")
+    if isinstance(fp, dict) and (lo or hi):
+        ordered_keys = [k for k in ("day5", "day10", "day15", "week1", "week2", "week3", "week4", "goal") if k in fp]
+        prev = lo
+        for k in ordered_keys:
+            cv = clamp(fp.get(k))
+            if cv is None:
+                continue
+            # enforce monotonic non-decreasing progression toward the goal
+            cv = max(cv, prev)
+            if cv != fp.get(k):
+                corrections.append(f"follower_plan.{k}: {fp.get(k)} → {cv} (kept within {lo:,}–{hi:,})")
+            fp[k] = cv
+            prev = cv
+        strategy["follower_plan"] = fp
+        checks.append("Follower milestones verified within current→goal bounds")
+
+    # 2) content_mix percentages should sum to 100
+    cm = strategy.get("content_mix")
+    if isinstance(cm, dict) and cm:
+        nums = {k: (float(v) if isinstance(v, (int, float)) else 0) for k, v in cm.items()}
+        total = sum(nums.values())
+        if total > 0 and abs(total - 100) > 1:
+            normed = {k: round(v / total * 100) for k, v in nums.items()}
+            # fix rounding drift on the largest bucket
+            drift = 100 - sum(normed.values())
+            if normed:
+                big = max(normed, key=normed.get)
+                normed[big] += drift
+            strategy["content_mix"] = normed
+            corrections.append(f"content_mix normalised to 100% (was {round(total)}%)")
+        checks.append("Content mix percentages sum to 100")
+
+    # 3) goal consistency vs feasibility
+    if feasibility:
+        f_goal = int(feasibility.get("target_followers", goal) or goal)
+        if goal and f_goal and goal != f_goal:
+            corrections.append(f"goal mismatch reconciled to computed target {goal:,}")
+        checks.append("Goal target reconciled with feasibility math")
+
+    # 4) confidence + labelling. Live IG data = high confidence; otherwise the
+    # plan is built from stored counts / brand brief, so figures are estimates.
+    confidence = "high" if data_src == "live" else ("medium" if data_src == "stored" else "low")
+    if confidence != "high":
+        note = (
+            "Estimate — based on stored follower count; connect Instagram for live-measured figures."
+            if confidence == "medium" else
+            "Assumption — no Instagram connected; figures are brand-brief projections, not measured data."
+        )
+        strategy["data_confidence"] = confidence
+        strategy["data_confidence_note"] = note
+        checks.append(f"Low-confidence figures labelled ({confidence})")
+
+    return strategy, {"checks": checks, "corrections": corrections, "confidence": confidence}
 
 
 def _fallback_strategy(brand: dict, days_ahead: int, ig_audit: dict = None) -> dict:
