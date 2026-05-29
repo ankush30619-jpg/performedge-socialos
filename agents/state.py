@@ -41,6 +41,10 @@ class SocialOSState(TypedDict):
     mode:       Annotated[str, _last]
     days_ahead: Annotated[int, _last]
 
+    # ── User-supplied growth goal (optional — overrides auto-calculation) ─────
+    follower_goal:              Annotated[Optional[int], _last]
+    current_followers_override: Annotated[Optional[int], _last]
+
     # ── Brand data (populated by Brand Manager) ───────────────────────────────
     brand:           Annotated[Optional[dict], _last]
     brand_knowledge: Annotated[Optional[dict], _last]

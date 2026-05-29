@@ -56,12 +56,14 @@ def _get_supabase():
 
 
 async def growth_planner_node(state: SocialOSState, event_queue: asyncio.Queue) -> dict:
-    brand           = state.get("brand") or {}
-    brand_knowledge = state.get("brand_knowledge") or {}
-    analyst_report  = state.get("analyst_report") or {}
-    days_ahead      = state.get("days_ahead", 15)
-    run_id          = state.get("run_id", "")
-    mode            = state.get("mode", "full")
+    brand                      = state.get("brand") or {}
+    brand_knowledge            = state.get("brand_knowledge") or {}
+    analyst_report             = state.get("analyst_report") or {}
+    days_ahead                 = state.get("days_ahead", 15)
+    run_id                     = state.get("run_id", "")
+    mode                       = state.get("mode", "full")
+    user_follower_goal         = state.get("follower_goal")          # user-supplied target
+    current_followers_override = state.get("current_followers_override")  # user-supplied current
 
     await event_queue.put({
         "type": "agent_progress",
@@ -94,7 +96,11 @@ async def growth_planner_node(state: SocialOSState, event_queue: asyncio.Queue) 
         "message": "Auditing Instagram performance — analysing every post…",
     })
 
-    ig_audit    = _build_ig_audit(analyst_report, brand, brand_knowledge)
+    ig_audit    = _build_ig_audit(
+        analyst_report, brand, brand_knowledge,
+        follower_goal=user_follower_goal,
+        current_followers_override=current_followers_override,
+    )
     feasibility = _calculate_goal_feasibility(ig_audit, days_ahead)
 
     await event_queue.put({
@@ -152,13 +158,23 @@ async def growth_planner_node(state: SocialOSState, event_queue: asyncio.Queue) 
 
 # ── Instagram Audit ─────────────────────────────────────────────────────────
 
-def _build_ig_audit(analyst_report: dict, brand: dict, brand_knowledge: dict = None) -> dict:
+def _build_ig_audit(
+    analyst_report: dict,
+    brand: dict,
+    brand_knowledge: dict = None,
+    follower_goal: int = None,
+    current_followers_override: int = None,
+) -> dict:
     """Analyse the analyst_report to produce an Instagram audit dict."""
     top_posts    = analyst_report.get("topPosts") or []
     followers    = analyst_report.get("followerCount", 0) or 0
     avg_er       = analyst_report.get("avgEngagementRate", 0) or 0
     avg_reach    = analyst_report.get("avgReach", 0) or 0
     ig_connected = analyst_report.get("ig_connected", False)
+
+    # Override current follower count if user supplied one
+    if current_followers_override is not None and current_followers_override >= 0:
+        followers = current_followers_override
 
     # Classify posts as working / not working
     working     = []
@@ -189,12 +205,13 @@ def _build_ig_audit(analyst_report: dict, brand: dict, brand_knowledge: dict = N
     # Best content type
     best_ct = max(content_types, key=content_types.get) if content_types else "Reel"
 
-    # Goal: 10% follower growth this month (or 90-day KPI target from analyst if no IG)
+    # Goal: user-supplied target → 90-day KPI estimate → 10% auto-growth
     current_followers = followers
-    if ig_connected and followers > 0:
+    if follower_goal is not None and follower_goal > 0:
+        goal_followers = follower_goal
+    elif ig_connected and followers > 0:
         goal_followers = max(followers + 100, int(followers * 1.1))
     else:
-        # Pull realistic target from analyst's strategic baseline
         kpi = (analyst_report.get("kpi_targets_90day") or {})
         goal_followers = int(kpi.get("followers", 0)) or 500
     gap = max(goal_followers - current_followers, 0)
@@ -325,13 +342,34 @@ async def _generate_strategy(brand, brand_knowledge, analyst_report, research_da
                         f"{name} and {niche} specifically. Generic advice is unacceptable.\n\n"
                         f"CRITICAL RULES:\n"
                         f"1. NEVER assume follower counts. Use ONLY the actual data provided.\n"
-                        f"2. If goal requires >3x acceleration, flag it and provide an urgent bridge plan.\n"
-                        f"3. Produce day_by_day_plan when days_ahead ≤ 21 (one entry per day). "
+                        f"2. Produce day_by_day_plan when days_ahead ≤ 21 (one entry per day). "
                         f"Produce weekly_plan when days_ahead > 21.\n"
-                        f"4. performance_diagnosis must reference actual post data — not generic insights.\n"
-                        f"5. pillar_breakdown must have one entry per content pillar with real performance assessment.\n"
-                        f"6. Every insight must feel like a strategist spent hours on this brand.\n\n"
-                        f"Brand context:\n{context_block[:800] if context_block else ''}"
+                        f"3. performance_diagnosis must reference actual post data — not generic insights.\n"
+                        f"4. pillar_breakdown must have one entry per content pillar with real performance assessment.\n"
+                        f"5. Every insight must feel like a strategist spent hours on this brand.\n\n"
+                        + (
+                            f"GOAL INTENSITY: {feasibility['acceleration_needed']}x acceleration required.\n"
+                            + (
+                                f"EXTREME GOAL — Requires {feasibility['acceleration_needed']}x growth rate. "
+                                f"growth_tactics MUST include: (a) daily Reels posting minimum, "
+                                f"(b) at least 2 collaboration / creator-swap campaigns, "
+                                f"(c) paid promotion strategy (even $5/day boosts), "
+                                f"(d) viral hook challenge or trend-jacking plan. "
+                                f"Mark this goal as HIGH RISK in goal_strategy.narrative.\n"
+                                if feasibility['acceleration_needed'] >= 5 else
+                                f"AGGRESSIVE GOAL — Requires {feasibility['acceleration_needed']}x growth rate. "
+                                f"growth_tactics MUST include: (a) 2x posting frequency vs current, "
+                                f"(b) at least 1 collaboration or niche creator partnership, "
+                                f"(c) engagement pod or comment strategy to boost algorithmic reach.\n"
+                                if feasibility['acceleration_needed'] >= 3 else
+                                f"CHALLENGING GOAL — Requires {feasibility['acceleration_needed']}x growth rate. "
+                                f"growth_tactics should emphasise consistency and Reels cadence.\n"
+                                if feasibility['acceleration_needed'] >= 2 else
+                                f"ACHIEVABLE GOAL — Standard growth path. Focus on quality over frequency.\n"
+                            )
+                            if feasibility else ""
+                        )
+                        + f"\nBrand context:\n{context_block[:800] if context_block else ''}"
                     ),
                 },
                 {

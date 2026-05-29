@@ -11,7 +11,7 @@ import { AGENT_LABELS, AGENT_ICONS, AGENT_DESCRIPTIONS, AGENT_PRODUCES } from "@
 import {
   Play, StopCircle, Download, ChevronDown, ChevronUp, Terminal,
   Clock, CheckCircle2, Layers, FileText, Presentation,
-  Calendar, Paintbrush, RefreshCw,
+  Calendar, Paintbrush, RefreshCw, Target, TrendingUp,
 } from "lucide-react";
 import Link from "next/link";
 import type { SSEEvent, AgentRun } from "@/types";
@@ -51,7 +51,12 @@ export default function AgentsPage() {
   const [pipelineDone, setPipelineDone]   = useState(false);
   const [isPipelineActive, setIsPipelineActive] = useState(false); // true while pipeline running
   const [elapsedSec, setElapsedSec]       = useState(0);
-  const [runOptions, setRunOptions]       = useState({ mode: "full", daysAhead: 15 });
+  const [runOptions, setRunOptions]       = useState<{
+    mode: string;
+    daysAhead: number;
+    followerGoal: string;
+    currentFollowers: string;
+  }>({ mode: "full", daysAhead: 15, followerGoal: "", currentFollowers: "" });
   const sseRef        = useRef<EventSource | null>(null);
   const logsEndRef    = useRef<HTMLDivElement>(null);
   const timerRef      = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -70,6 +75,14 @@ export default function AgentsPage() {
     sseRef.current?.close();
     if (timerRef.current) clearInterval(timerRef.current);
   }, []);
+
+  // Pre-fill current followers from brand's live IG follower count
+  useEffect(() => {
+    if (activeBrand?.igFollowers && !runOptions.currentFollowers) {
+      setRunOptions(o => ({ ...o, currentFollowers: String(activeBrand.igFollowers) }));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeBrand?.igFollowers]);
 
   // Polling fallback: when pipeline is active but SSE might have failed,
   // poll run status every 5 seconds to detect completion
@@ -124,10 +137,16 @@ export default function AgentsPage() {
   const pastRuns: AgentRun[] = (runsData?.runs ?? []).slice(0, 5);
 
   const startMutation = useMutation({
-    mutationFn: () => agentAPI.run(activeBrand!.id, {
-      mode:      runOptions.mode,
-      daysAhead: runOptions.daysAhead,
-    }),
+    mutationFn: () => {
+      const goalNum    = parseInt(runOptions.followerGoal, 10);
+      const currentNum = parseInt(runOptions.currentFollowers, 10);
+      return agentAPI.run(activeBrand!.id, {
+        mode:      runOptions.mode,
+        daysAhead: runOptions.daysAhead,
+        ...(goalNum    > 0  ? { followerGoal:    goalNum    } : {}),
+        ...(currentNum >= 0 && runOptions.currentFollowers !== "" ? { currentFollowers: currentNum } : {}),
+      });
+    },
     onSuccess: (res) => {
       const run = res.data.run;
       setActiveRun(run);
@@ -412,6 +431,49 @@ export default function AgentsPage() {
             )}
           </GlassCard>
 
+          {/* ── Follower Growth Goal ── */}
+          <GlassCard className="p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <Target className="w-4 h-4 text-purple-400" />
+              <h2 className="font-semibold text-white text-sm">Follower Growth Goal</h2>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20 ml-auto">Optional</span>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-white/40 mb-1.5 block">Current Followers</label>
+                <input
+                  type="number"
+                  min={0}
+                  placeholder="e.g. 12000"
+                  value={runOptions.currentFollowers}
+                  onChange={e => setRunOptions(o => ({ ...o, currentFollowers: e.target.value }))}
+                  disabled={isRunning}
+                  className="input-glass w-full"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-white/40 mb-1.5 block">Target Followers</label>
+                <input
+                  type="number"
+                  min={0}
+                  placeholder="e.g. 50000"
+                  value={runOptions.followerGoal}
+                  onChange={e => setRunOptions(o => ({ ...o, followerGoal: e.target.value }))}
+                  disabled={isRunning}
+                  className="input-glass w-full"
+                />
+              </div>
+            </div>
+
+            <FollowerGoalCalculator
+              currentFollowers={parseInt(runOptions.currentFollowers, 10) || 0}
+              followerGoal={parseInt(runOptions.followerGoal, 10) || 0}
+              daysAhead={runOptions.daysAhead}
+              hasValues={runOptions.followerGoal !== ""}
+            />
+          </GlassCard>
+
           {/* Run History */}
           {pastRuns.length > 0 && (
             <GlassCard className="p-5">
@@ -544,6 +606,152 @@ export default function AgentsPage() {
           onClose={() => setSelectedAgentKey(null)}
         />
       )}
+    </div>
+  );
+}
+
+// ── Follower Goal Calculator ──────────────────────────────────────────────────
+
+function FollowerGoalCalculator({
+  currentFollowers,
+  followerGoal,
+  daysAhead,
+  hasValues,
+}: {
+  currentFollowers: number;
+  followerGoal: number;
+  daysAhead: number;
+  hasValues: boolean;
+}) {
+  if (!hasValues || followerGoal <= 0) {
+    return (
+      <p className="text-[10px] text-white/25 mt-3 leading-relaxed">
+        Enter your target to see growth math and get a goal-adapted strategy
+      </p>
+    );
+  }
+
+  const gap      = Math.max(0, followerGoal - currentFollowers);
+  const perDay   = daysAhead > 0 && gap > 0 ? gap / daysAhead : 0;
+  const perWeek  = perDay * 7;
+  const perMonth = perDay * 30;
+  const progressPct = followerGoal > 0
+    ? Math.min(100, Math.round((currentFollowers / followerGoal) * 100))
+    : 0;
+  const m25 = Math.round(currentFollowers + gap * 0.25);
+  const m50 = Math.round(currentFollowers + gap * 0.50);
+  const m75 = Math.round(currentFollowers + gap * 0.75);
+
+  // Probability heuristic based on required daily growth
+  const probability =
+    perDay <= 0   ? 0
+    : perDay <= 5  ? 88
+    : perDay <= 15 ? 72
+    : perDay <= 35 ? 52
+    : perDay <= 70 ? 32
+    : perDay <= 150 ? 18
+    : 10;
+
+  const probColor =
+    probability >= 70 ? { bg: "bg-green-500/10", border: "border-green-500/20", text: "text-green-400" }
+    : probability >= 40 ? { bg: "bg-yellow-500/10", border: "border-yellow-500/20", text: "text-yellow-400" }
+    : { bg: "bg-red-500/10", border: "border-red-500/20", text: "text-red-400" };
+
+  const probLabel =
+    probability >= 70 ? "Achievable with consistent effort"
+    : probability >= 40 ? "Aggressive — needs strong content cadence"
+    : "Very aggressive — requires viral + paid strategy";
+
+  function fmt(n: number) {
+    return n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(Math.ceil(n));
+  }
+
+  return (
+    <div className="mt-4 space-y-3">
+      {/* Progress bar */}
+      <div>
+        <div className="flex justify-between text-[10px] text-white/40 mb-1.5">
+          <span>{currentFollowers.toLocaleString()}</span>
+          <span className="text-purple-400 font-medium">{progressPct}% of goal</span>
+          <span>{followerGoal.toLocaleString()}</span>
+        </div>
+        <div className="relative h-2.5 bg-white/[0.08] rounded-full overflow-visible">
+          <div
+            className="absolute inset-y-0 left-0 bg-purple-500 rounded-full transition-all"
+            style={{ width: `${Math.max(2, progressPct)}%` }}
+          />
+          {/* Milestone ticks */}
+          {[25, 50, 75].map(pct => (
+            <div
+              key={pct}
+              className="absolute top-0 bottom-0 w-px bg-white/30"
+              style={{ left: `${pct}%` }}
+            />
+          ))}
+        </div>
+        {/* Milestone labels */}
+        <div className="grid grid-cols-5 text-[9px] text-white/25 mt-1">
+          <span />
+          <span className="text-center">{(m25 / 1000).toFixed(1)}K</span>
+          <span className="text-center">{(m50 / 1000).toFixed(1)}K</span>
+          <span className="text-center">{(m75 / 1000).toFixed(1)}K</span>
+          <span />
+        </div>
+      </div>
+
+      {/* Stats grid */}
+      <div className="grid grid-cols-2 gap-1.5">
+        {[
+          { label: "Need total", value: `+${gap.toLocaleString()}`, sub: "followers" },
+          { label: "Per day",    value: `+${fmt(perDay)}`,          sub: "daily target" },
+          { label: "Per week",   value: `+${fmt(perWeek)}`,         sub: "weekly target" },
+          { label: "Per month",  value: `+${fmt(perMonth)}`,        sub: "monthly target" },
+        ].map(({ label, value, sub }) => (
+          <div key={label} className="p-2.5 rounded-xl bg-white/[0.04] border border-white/[0.06]">
+            <p className="text-[9px] text-white/30 uppercase tracking-wider">{label}</p>
+            <p className="text-sm font-bold text-white mt-0.5">{value}</p>
+            <p className="text-[9px] text-white/40">{sub}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Achievement probability */}
+      <div className={`p-2.5 rounded-xl border ${probColor.bg} ${probColor.border}`}>
+        <div className="flex items-center justify-between mb-0.5">
+          <div className="flex items-center gap-1.5">
+            <TrendingUp className="w-3 h-3 text-white/40" />
+            <p className="text-[10px] text-white/50">Achievement Probability</p>
+          </div>
+          <p className={`text-sm font-bold ${probColor.text}`}>{probability}%</p>
+        </div>
+        <p className="text-[9px] text-white/35 leading-relaxed">{probLabel}</p>
+      </div>
+
+      {/* Milestones */}
+      <div>
+        <p className="text-[9px] text-white/30 uppercase tracking-wider mb-1.5">Milestones</p>
+        <div className="space-y-1">
+          {[
+            { pct: "25%", value: m25 },
+            { pct: "50%", value: m50 },
+            { pct: "75%", value: m75 },
+            { pct: "100%", value: followerGoal },
+          ].map(({ pct, value }) => {
+            const reached = currentFollowers >= value;
+            return (
+              <div key={pct} className="flex items-center gap-2">
+                <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${reached ? "bg-purple-400" : "bg-white/15"}`} />
+                <div className="flex-1 flex justify-between">
+                  <span className={`text-[10px] ${reached ? "text-purple-400 font-medium" : "text-white/35"}`}>{pct}</span>
+                  <span className={`text-[10px] font-mono ${reached ? "text-purple-400" : "text-white/40"}`}>
+                    {value.toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

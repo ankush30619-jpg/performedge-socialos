@@ -23,10 +23,12 @@ const runSchema = z.object({
   brandId: z.string(),
   mode: z.enum(["full", "analyst_only", "strategy_only", "design_only", "growth_planner_only", "performance_report"]).default("full"),
   daysAhead: z.number().int().min(1).max(30).default(15),
+  followerGoal: z.number().int().min(0).optional(),
+  currentFollowers: z.number().int().min(0).optional(),
 });
 
 // ── Shared: execute pipeline + save results ─────────────────────────────────
-async function executePipelineRun(runId: string, brandId: string, userId: string, mode: string, daysAhead: number) {
+async function executePipelineRun(runId: string, brandId: string, userId: string, mode: string, daysAhead: number, followerGoal?: number, currentFollowers?: number) {
   console.log(`[Pipeline] Starting run ${runId} for brand ${brandId}`);
 
   await prisma.agentRun.update({
@@ -81,6 +83,8 @@ async function executePipelineRun(runId: string, brandId: string, userId: string
       `${AGENTS_URL}/runs`,
       {
         runId, brandId, userId, mode, daysAhead,
+        followerGoal,
+        currentFollowers,
         brand: brand ? {
           id:                brand.id,
           name:              brand.name,
@@ -258,7 +262,7 @@ export async function agentRoutes(app: FastifyInstance) {
     // Always execute directly in background (no BullMQ for pipeline runs)
     // setImmediate ensures the 202 response is sent before heavy work starts
     setImmediate(() => {
-      executePipelineRun(run.id, body.brandId, user.id, body.mode, body.daysAhead).catch(
+      executePipelineRun(run.id, body.brandId, user.id, body.mode, body.daysAhead, body.followerGoal, body.currentFollowers).catch(
         (e) => console.error("[Pipeline] Background run error:", e)
       );
     });

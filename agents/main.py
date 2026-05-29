@@ -48,6 +48,9 @@ class RunRequest(BaseModel):
     mode: str = "full"
     daysAhead: int = 15
     brand: dict | None = None   # full brand object with decrypted igAccessToken
+    # User-supplied follower growth goal (optional)
+    followerGoal: int | None = None
+    currentFollowers: int | None = None
     # Optional inputs used only when mode == "performance_report"
     previousStrategy: dict | None = None
     previousAnalystReport: dict | None = None
@@ -89,6 +92,8 @@ async def start_run(req: RunRequest):
         "mode": req.mode,
         "days_ahead": req.daysAhead,
         "brand": req.brand,  # full brand with igAccessToken — set by executePipelineRun
+        "follower_goal": req.followerGoal,
+        "current_followers_override": req.currentFollowers,
         "brand_knowledge": None,
         "analyst_report": None,
         "research_data": None,
