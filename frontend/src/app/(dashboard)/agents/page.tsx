@@ -7,7 +7,7 @@ import { GlassCard } from "@/components/ui/GlassCard";
 import { AgentNode } from "@/components/ui/AgentNode";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { AGENT_LABELS } from "@/lib/utils";
+import { AGENT_LABELS, AGENT_ICONS, AGENT_DESCRIPTIONS, AGENT_PRODUCES } from "@/lib/utils";
 import {
   Play, StopCircle, Download, ChevronDown, ChevronUp, Terminal,
   Clock, CheckCircle2, Layers, FileText, Presentation,
@@ -46,6 +46,7 @@ export default function AgentsPage() {
   const activeBrand = useActiveBrand();
   const { addSSEEvent, clearSSEEvents, sseEvents, setActiveRun, activeRun } = useAppStore();
   const [agentStatuses, setAgentStatuses] = useState<AgentStatuses>({});
+  const [selectedAgentKey, setSelectedAgentKey] = useState<string | null>(null);
   const [showLogs, setShowLogs]           = useState(false);
   const [pipelineDone, setPipelineDone]   = useState(false);
   const [isPipelineActive, setIsPipelineActive] = useState(false); // true while pipeline running
@@ -468,6 +469,7 @@ export default function AgentsPage() {
                     agentKey={key}
                     status={(agentData?.status as "pending" | "running" | "completed" | "failed" | "skipped") ?? "pending"}
                     message={agentData?.message}
+                    onClick={() => setSelectedAgentKey(key)}
                   />
                 );
               })}
@@ -486,6 +488,9 @@ export default function AgentsPage() {
               </div>
             )}
           </GlassCard>
+
+          {/* Generated Files — all PPT/Excel from every run for this brand */}
+          <GeneratedFilesPanel runs={pastRuns} />
 
           {/* Live Logs */}
           <GlassCard variant="dark" className="p-5">
@@ -530,6 +535,167 @@ export default function AgentsPage() {
           </GlassCard>
         </div>
       </div>
+
+      {/* Agent Detail Modal */}
+      {selectedAgentKey && (
+        <AgentDetailModal
+          agentKey={selectedAgentKey}
+          agentStatuses={agentStatuses}
+          onClose={() => setSelectedAgentKey(null)}
+        />
+      )}
     </div>
+  );
+}
+
+// ── Agent Detail Modal ────────────────────────────────────────────────────────
+
+type AgentStatusVal = "pending" | "running" | "completed" | "failed" | "skipped";
+
+function AgentDetailModal({
+  agentKey,
+  agentStatuses,
+  onClose,
+}: {
+  agentKey: string;
+  agentStatuses: Record<string, { status: string; message?: string }>;
+  onClose: () => void;
+}) {
+  const label       = AGENT_LABELS[agentKey]       ?? agentKey;
+  const icon        = AGENT_ICONS[agentKey]        ?? "🤖";
+  const description = AGENT_DESCRIPTIONS[agentKey] ?? "";
+  const produces    = AGENT_PRODUCES[agentKey]     ?? "";
+  const agentData   = agentStatuses[agentKey];
+  const status      = (agentData?.status ?? "pending") as AgentStatusVal;
+  const message     = agentData?.message;
+
+  const STATUS_BG: Record<AgentStatusVal, string> = {
+    pending:   "bg-white/[0.06] text-white/40",
+    running:   "bg-brand/15 text-brand-light border border-brand/30",
+    completed: "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20",
+    failed:    "bg-red-500/10 text-red-400 border border-red-500/20",
+    skipped:   "bg-white/[0.04] text-white/30",
+  };
+
+  const STATUS_LABEL: Record<AgentStatusVal, string> = {
+    pending: "Pending", running: "Running", completed: "Completed",
+    failed: "Failed",   skipped: "Skipped",
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full max-w-md mx-4 rounded-2xl border border-white/[0.08] bg-[#0f1117] p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start gap-3 mb-5">
+          <span className="text-3xl leading-none mt-0.5">{icon}</span>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-lg font-semibold text-white">{label}</h2>
+            <span className={`inline-block mt-1 text-[11px] font-medium px-2 py-0.5 rounded-full ${STATUS_BG[status]}`}>
+              {STATUS_LABEL[status]}
+            </span>
+          </div>
+          <button onClick={onClose} className="text-white/30 hover:text-white/70 transition text-xl leading-none mt-0.5">✕</button>
+        </div>
+
+        {message && (
+          <div className="mb-4 px-3 py-2.5 rounded-lg bg-white/[0.04] border border-white/[0.06]">
+            <p className="text-xs text-white/60 leading-relaxed">{message}</p>
+          </div>
+        )}
+
+        <div className="mb-5">
+          <p className="text-[10px] font-semibold text-white/30 uppercase tracking-widest mb-2">What it does</p>
+          <p className="text-sm text-white/65 leading-relaxed">{description}</p>
+        </div>
+
+        <div>
+          <p className="text-[10px] font-semibold text-white/30 uppercase tracking-widest mb-2">Produces</p>
+          <div className="flex flex-wrap gap-1.5">
+            {produces.split(" · ").map((item) => (
+              <span key={item} className="text-[11px] px-2.5 py-1 rounded-full bg-brand/10 border border-brand/20 text-brand-light">
+                {item}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Generated Files Panel ─────────────────────────────────────────────────────
+
+type RunLike = { id: string; createdAt: string; mode?: string; pptUrl?: string; excelUrl?: string };
+
+function GeneratedFilesPanel({ runs }: { runs: RunLike[] }) {
+  type FileEntry = { runId: string; url: string; kind: "ppt" | "excel"; mode: string; createdAt: string; version: number };
+  const entries: FileEntry[] = [];
+  const oldestFirst = [...runs].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  const counters: Record<string, number> = {};
+  for (const r of oldestFirst) {
+    const mode = r.mode ?? "pipeline";
+    if (r.pptUrl)   { const k = `${mode}|ppt`;   counters[k] = (counters[k] ?? 0) + 1; entries.push({ runId: r.id, url: r.pptUrl,   kind: "ppt",   mode, createdAt: r.createdAt, version: counters[k] }); }
+    if (r.excelUrl) { const k = `${mode}|excel`; counters[k] = (counters[k] ?? 0) + 1; entries.push({ runId: r.id, url: r.excelUrl, kind: "excel", mode, createdAt: r.createdAt, version: counters[k] }); }
+  }
+  entries.reverse();
+
+  const modeLabel = (m: string) =>
+    m === "growth_planner_only" ? "Growth Planner" :
+    m === "performance_report"  ? "Performance Report" :
+    m === "full_pipeline"       ? "Full Pipeline" :
+    m.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+  const kindColor = (k: "ppt" | "excel") =>
+    k === "ppt"
+      ? { bg: "bg-purple-500/10", border: "border-purple-500/25", text: "text-purple-300", icon: "text-purple-400", label: "PPT" }
+      : { bg: "bg-emerald-500/10", border: "border-emerald-500/25", text: "text-emerald-300", icon: "text-emerald-400", label: "XLSX" };
+
+  return (
+    <GlassCard className="p-5">
+      <div className="flex items-center gap-2 mb-4">
+        <FileText className="w-4 h-4 text-brand-light" />
+        <h2 className="font-semibold text-white text-sm">Generated Files</h2>
+        {entries.length > 0 && (
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/[0.06] text-white/50">{entries.length} files · shared across team</span>
+        )}
+      </div>
+      {entries.length === 0 ? (
+        <div className="py-6 text-center">
+          <FileText className="w-7 h-7 text-white/20 mx-auto mb-2" />
+          <p className="text-sm text-white/40">No files yet</p>
+          <p className="text-xs text-white/30 mt-1">Run a pipeline to generate PPT &amp; Excel files</p>
+        </div>
+      ) : (
+        <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+          {entries.map((e) => {
+            const c = kindColor(e.kind);
+            const dateStr = new Date(e.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+            return (
+              <a key={`${e.runId}-${e.kind}`} href={e.url} target="_blank" rel="noopener noreferrer"
+                className={`flex items-center gap-3 p-3 rounded-xl ${c.bg} border ${c.border} hover:bg-white/[0.04] transition-all group`}
+              >
+                <div className={`flex-shrink-0 w-8 h-8 rounded-lg bg-dark-base/40 flex items-center justify-center ${c.icon}`}>
+                  <FileText className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`text-sm font-semibold ${c.text}`}>{modeLabel(e.mode)}</span>
+                    <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${c.bg} ${c.text} border ${c.border}`}>v{e.version}</span>
+                    <span className={`text-[10px] font-bold ${c.icon}`}>{c.label}</span>
+                  </div>
+                  <p className="text-[11px] text-white/40 mt-0.5">{dateStr}</p>
+                </div>
+                <Download className="w-4 h-4 text-white/30 group-hover:text-white/70 transition-colors" />
+              </a>
+            );
+          })}
+        </div>
+      )}
+    </GlassCard>
   );
 }
