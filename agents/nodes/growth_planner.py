@@ -144,19 +144,31 @@ async def growth_planner_node(state: SocialOSState, event_queue: asyncio.Queue) 
             "message": f"Quality check: {len(quality_report['corrections'])} value(s) corrected · confidence: {quality_report.get('confidence','medium')}",
         })
 
+    # ── Extended plan: forecasting + structured recs with evidence + 30/60/90-day calendar
+    await event_queue.put({
+        "type": "agent_progress",
+        "agentKey": "growthPlanner",
+        "message": "Generating investor-grade extended plan (forecasting + recommendations + execution calendar)…",
+    })
+    extended_plan = await _generate_extended_plan(
+        brand, ig_audit, feasibility, research_data, competitor_data, growth_strategy, days_ahead
+    )
+    _clamp_extended_forecasting(extended_plan, ig_audit)
+
     # ── Build PPT for growth_planner_only mode ────────────────────────────────
     ppt_url = None
     if mode == "growth_planner_only":
         await event_queue.put({
             "type": "agent_progress",
             "agentKey": "growthPlanner",
-            "message": "Building Growth Planner PPT deck…",
+            "message": "Building 22-slide investor-grade PPT deck…",
         })
         ppt_url = await _build_growth_ppt(
             brand, ig_audit, growth_strategy,
             research_data, competitor_data, days_ahead, run_id,
             analyst_report=analyst_report,
             feasibility=feasibility,
+            extended_plan=extended_plan,
         )
         await event_queue.put({
             "type": "agent_progress",
@@ -173,7 +185,7 @@ async def growth_planner_node(state: SocialOSState, event_queue: asyncio.Queue) 
                     "files_generated": [{
                         "name": "growth_planner.pptx",
                         "url": ppt_url,
-                        "type": "Strategy presentation (12 slides)",
+                        "type": "Strategy presentation (22 slides — investor-grade)",
                         "generated_by": "Growth Planner",
                         "data_confidence": quality_report.get("confidence", "medium"),
                         "produced_from": [
@@ -590,9 +602,150 @@ async def _generate_strategy(brand, brand_knowledge, analyst_report, research_da
         return _fallback_strategy(brand, days_ahead, ig_audit)
 
 
+# ── Extended Plan (forecasting + structured recs + execution calendar) ───────
+
+async def _generate_extended_plan(
+    brand: dict, ig_audit: dict, feasibility: dict,
+    research_data: dict, competitor_data: dict,
+    growth_strategy: dict, days_ahead: int,
+) -> dict:
+    """Second-pass GPT call for the investor-grade extended plan.
+    Adds: growth forecasting (3 scenarios), structured recommendations with
+    evidence, content audit breakdown, social media trends, and a 30-day
+    day-by-day + 60-90-day weekly execution calendar.
+
+    DATA QUALITY: all forecasts are labeled as Estimate/Assumption — never
+    measured fact. Numbers are clamped by _clamp_extended_forecasting.
+    """
+    oai = _get_oai()
+    if not oai:
+        return {}
+
+    name      = brand.get("name", "brand")
+    niche     = brand.get("niche", "")
+    followers = ig_audit.get("followers", 0)
+    goal      = ig_audit.get("goal_followers", 500)
+    avg_er    = ig_audit.get("avg_er", 0)
+    feas_prob = feasibility.get("probability_pct", 70)
+    accel     = feasibility.get("acceleration_needed", 1.0)
+    req_wk    = feasibility.get("required_weekly_growth", 5)
+
+    what_works = (growth_strategy.get("what_works") or [])[:3]
+    what_stop  = (growth_strategy.get("what_to_stop") or [])[:3]
+    comp_gaps  = (competitor_data.get("content_gaps") or [])[:4]
+    trends     = (research_data.get("trending_angles") or [])[:4]
+    tactics    = (growth_strategy.get("growth_tactics") or [])[:4]
+
+    try:
+        resp = await oai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        f"You are a senior growth strategist producing an investor-grade, non-generic report "
+                        f"for {name} ({niche}). Every recommendation must cite specific evidence from the "
+                        f"data provided — if a recommendation could apply to any brand, rewrite it.\n\n"
+                        f"STRICT DATA-QUALITY RULES:\n"
+                        f"1. All follower forecasts are ESTIMATES. Prefix assumptions: 'Estimate:' or 'Assumption:'.\n"
+                        f"2. Current followers = {followers:,}. All milestone values must be ≥ {followers:,}.\n"
+                        f"3. Never invent statistics, revenue, market-share, or competitor metrics.\n"
+                        f"4. Anti-generic: every item must reference {name}/{niche} specifically.\n"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Generate the extended investor-grade growth plan for {name} ({niche}).\n\n"
+                        f"PERFORMANCE DATA:\n"
+                        f"Followers: {followers:,} → Goal: {goal:,} | ER: {avg_er}% | "
+                        f"Success prob: {feas_prob}% | Accel needed: {accel}x | Need {req_wk}/week\n"
+                        f"What works: {'; '.join(what_works)}\n"
+                        f"What to stop: {'; '.join(what_stop)}\n"
+                        f"Competitor gaps: {'; '.join(str(g) for g in comp_gaps)}\n"
+                        f"Market trends: {'; '.join(str(t) for t in trends)}\n"
+                        f"Current tactics: {'; '.join(str(t) for t in tactics)}\n\n"
+                        f"Return JSON with these exact keys:\n\n"
+                        f"growth_forecasting: object with "
+                        f"assumptions (list of 3 explicit assumptions — prefix with 'Estimate:' or 'Assumption:'), "
+                        f"growth_drivers (list of 3 factors that determine the outcome), "
+                        f"day30/day60/day90/day180 — each an object with best/realistic/worst as integer follower "
+                        f"counts starting from {followers:,}. NEVER set any value below {followers:,}.\n\n"
+                        f"structured_recommendations: list of 5 objects, each with: "
+                        f"title (specific action — NOT 'post more'), "
+                        f"recommendation (2-3 sentences — exactly what to do for {name}/{niche}), "
+                        f"evidence (list of 2-3 specific data points FROM the provided data above — not invented), "
+                        f"reason (why this works for {name}/{niche} specifically), "
+                        f"expected_impact (concrete, e.g. '+X reach/week' or 'lifts save-rate by ~Y'), "
+                        f"priority ('P0'|'P1'|'P2'), difficulty ('low'|'medium'|'high'), "
+                        f"timeline (e.g. 'Days 1-14'). Order by priority (P0 first).\n\n"
+                        f"content_best_breakdown: object with format (content type), "
+                        f"hook_pattern (what the hook structure did), "
+                        f"why_it_worked (list of 3 specific reasons — reference the actual data), "
+                        f"replicable_formula (exact template to reproduce this), "
+                        f"recommended_frequency (e.g. '3x/week').\n\n"
+                        f"content_worst_breakdown: object with format (content type that underperforms), "
+                        f"why_it_failed (list of 2-3 specific reasons), "
+                        f"what_to_stop (specific pattern to avoid), "
+                        f"what_to_do_instead (the better alternative).\n\n"
+                        f"social_media_trends: list of 4 objects — trend (name), why_it_works (mechanism), "
+                        f"how_to_use (specific to {niche}), competitor_using (generic label).\n\n"
+                        f"execution_calendar_30: list of EXACTLY 30 objects for days 1-30 — "
+                        f"day (int), reel_topic (specific to {niche}), carousel_topic (specific to {niche}), "
+                        f"story_topic (1 line), cta (CTA mechanism), goal (e.g. '+5 followers, 10 saves').\n\n"
+                        f"execution_calendar_weeks_5_to_12: list of 8 objects for weeks 5-12 — "
+                        f"week (5-12), theme (1 line), reels (2 topic lines), carousels (1 topic line), "
+                        f"stories (pattern), goal (weekly KPI)."
+                    ),
+                },
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.4,
+            max_tokens=5000,
+        )
+        return json.loads(resp.choices[0].message.content)
+    except Exception as e:
+        print(f"[GrowthPlanner] Extended plan GPT error: {e}")
+        import traceback; traceback.print_exc()
+        return {}
+
+
+def _clamp_extended_forecasting(ep: dict, ig_audit: dict) -> None:
+    """Clamp forecasting milestone values to realistic bounds in-place.
+    Enforces: value ≥ current_followers; value ≤ current*20 (prevents GPT hallucinating
+    viral spikes); and worst ≤ realistic ≤ best within each period.
+    """
+    if not isinstance(ep, dict):
+        return
+    followers = int(ig_audit.get("followers", 0) or 0)
+    upper     = max(followers * 20, followers + 50000)  # generous cap
+    gf = ep.get("growth_forecasting")
+    if not isinstance(gf, dict):
+        return
+    for period in ("day30", "day60", "day90", "day180"):
+        pd = gf.get(period)
+        if not isinstance(pd, dict):
+            continue
+        clamped = {}
+        for scenario in ("worst", "realistic", "best"):
+            v = pd.get(scenario)
+            try:
+                clamped[scenario] = max(followers, min(upper, int(float(v))))
+            except (TypeError, ValueError):
+                clamped[scenario] = None
+        # enforce ordering: worst ≤ realistic ≤ best
+        vals = [clamped[s] for s in ("worst", "realistic", "best") if clamped[s] is not None]
+        if vals:
+            vals_sorted = sorted(vals)
+            for i, s in enumerate(("worst", "realistic", "best")):
+                if clamped[s] is not None and i < len(vals_sorted):
+                    clamped[s] = vals_sorted[i]
+        gf[period] = {**pd, **{k: v for k, v in clamped.items() if v is not None}}
+
+
 # ── Growth Planner PPT ───────────────────────────────────────────────────────
 
-async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor_data, days_ahead, run_id, analyst_report: dict = None, feasibility: dict = None) -> str | None:
+async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor_data, days_ahead, run_id, analyst_report: dict = None, feasibility: dict = None, extended_plan: dict = None) -> str | None:
     try:
         from pptx import Presentation
         from pptx.util import Inches, Pt
@@ -652,406 +805,550 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         grey         = RGBColor(0x9C, 0xA3, 0xAF)
         light        = RGBColor(0xCB, 0xD5, 0xE1)
         mid_dark     = RGBColor(0x12, 0x0D, 0x28)
-        total_slides = 12
+        ep           = extended_plan or {}
+        amber        = RGBColor(0xF5, 0x9E, 0x0B)
+        total_slides = 22
 
         def footer(slide, n):
             txt(slide, f"Prepared by PerformEdge  ·  {date_str}  ·  {n}/{total_slides}",
                 Inches(0.4), Inches(5.25), Inches(9.2), Inches(0.3), 9, color=RGBColor(0x4B,0x55,0x63))
 
+        def slide_header(slide, tag, title):
+            bar(slide, 0, 0, Inches(10), Inches(0.06), brand_color)
+            txt(slide, tag, Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
+            txt(slide, title, Inches(0.4), Inches(0.55), Inches(9), Inches(0.5), 20, bold=True)
+
         # ── Slide 1: Cover ──
         s = prs.slides.add_slide(blank); bg(s, dark)
         bar(s, 0, 0, Inches(0.06), prs.slide_height, brand_color)
-        txt(s, name.upper(), Inches(0.4), Inches(1.0), Inches(9), Inches(1.4), 44, bold=True)
-        txt(s, "Social Media", Inches(0.4), Inches(2.45), Inches(9), Inches(0.7), 28, color=accent)
-        txt(s, "Growth Strategy", Inches(0.4), Inches(3.1), Inches(9), Inches(0.7), 28, color=accent)
-        txt(s, niche, Inches(0.4), Inches(3.9), Inches(9), Inches(0.45), 14, color=grey, italic=True)
-        txt(s, "Prepared by PerformEdge", Inches(0.4), Inches(4.85), Inches(6), Inches(0.3), 11, color=RGBColor(0x6B,0x72,0x80))
-        txt(s, month_str, Inches(7.5), Inches(4.85), Inches(2), Inches(0.3), 11, color=RGBColor(0x6B,0x72,0x80), align=PP_ALIGN.RIGHT)
+        txt(s, name.upper(), Inches(0.4), Inches(0.9), Inches(9), Inches(1.3), 44, bold=True)
+        txt(s, "Social Media", Inches(0.4), Inches(2.28), Inches(9), Inches(0.65), 28, color=accent)
+        txt(s, "Growth Strategy", Inches(0.4), Inches(2.9), Inches(9), Inches(0.65), 28, color=accent)
+        txt(s, niche, Inches(0.4), Inches(3.7), Inches(9), Inches(0.4), 14, color=grey, italic=True)
+        txt(s, "Investor-Grade Report  ·  Prepared by PerformEdge", Inches(0.4), Inches(4.75), Inches(7), Inches(0.3), 11, color=RGBColor(0x6B,0x72,0x80))
+        txt(s, month_str, Inches(7.5), Inches(4.75), Inches(2), Inches(0.3), 11, color=RGBColor(0x6B,0x72,0x80), align=PP_ALIGN.RIGHT)
 
-        # ── Slide 2: Brand Snapshot ──
+        # ── Slide 2: Executive Summary ──
         s = prs.slides.add_slide(blank); bg(s, dark)
-        bar(s, 0, 0, Inches(10), Inches(0.06), brand_color)
-        txt(s, "01  ·  BRAND SNAPSHOT", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
-        txt(s, "Where you stand today.", Inches(0.4), Inches(0.55), Inches(6), Inches(0.5), 20, bold=True)
-        data_source_label = ig_audit.get("data_source", "estimate")
+        slide_header(s, "01  ·  EXECUTIVE SUMMARY", "The bottom line — what we found and what it means.")
+        prob     = feas.get("probability_pct", 70)
+        prob_col = green if prob >= 70 else (amber if prob >= 40 else red)
+        exec_stats = [
+            (f"{followers:,}",    "Current Followers", brand_color),
+            (f"{goal:,}",         "Growth Target",     green),
+            (f"{avg_er}%",        "Engagement Rate",   accent),
+            (f"{prob}%",          "Goal Probability",  prob_col),
+            (f"{feas.get('acceleration_needed',1)}x", "Growth Needed", amber),
+        ]
+        for i, (val, lbl, col) in enumerate(exec_stats):
+            x = Inches(0.3 + i * 1.9)
+            bar(s, x, Inches(1.2), Inches(1.78), Inches(1.5), mid_dark)
+            bar(s, x, Inches(1.2), Inches(1.78), Inches(0.05), col)
+            txt(s, val, x+Inches(0.1), Inches(1.38), Inches(1.6), Inches(0.68), 20, bold=True, color=col, align=PP_ALIGN.CENTER)
+            txt(s, lbl, x+Inches(0.05), Inches(2.1), Inches(1.7), Inches(0.3), 8, color=grey, align=PP_ALIGN.CENTER)
+        p0_recs   = [r for r in (ep.get("structured_recommendations") or []) if str(r.get("priority","")).upper() in ("P0","P1")][:3]
+        top_items = [str(r.get("title","") or r) for r in p0_recs] or (strategy.get("growth_tactics") or [])[:3]
+        bar(s, Inches(0.3), Inches(2.85), Inches(9.4), Inches(1.85), mid_dark)
+        txt(s, "TOP STRATEGIC PRIORITIES", Inches(0.45), Inches(2.93), Inches(9), Inches(0.3), 8, color=accent, bold=True)
+        for j, p in enumerate(top_items[:3]):
+            txt(s, f"{j+1}.  {str(p)[:115]}", Inches(0.45), Inches(3.28+j*0.42), Inches(9.1), Inches(0.38), 11, color=light)
+        footer(s, 2)
+
+        # ── Slide 3: Brand & Audience Analysis ──
+        s = prs.slides.add_slide(blank); bg(s, dark)
+        slide_header(s, "02  ·  BRAND & AUDIENCE ANALYSIS", "Who you are and who you're speaking to.")
+        positioning    = brand.get("positioning","") or ""
+        differentiation= brand.get("differentiation","") or ""
+        pain_points    = brand.get("audiencePainPoints","") or ""
+        aspirations    = brand.get("audienceAspirations","") or ""
+        bar(s, Inches(0.3), Inches(1.15), Inches(4.5), Inches(3.95), mid_dark)
+        bar(s, Inches(0.3), Inches(1.15), Inches(4.5), Inches(0.05), brand_color)
+        txt(s, "BRAND PROFILE", Inches(0.45), Inches(1.23), Inches(4.2), Inches(0.3), 8, color=brand_color, bold=True)
+        brand_fields = [f"Niche: {brand.get('niche','')[:45]}", f"Industry: {brand.get('industry','')[:45]}",
+                        f"Positioning: {positioning[:65]}", f"Differentiator: {differentiation[:65]}"]
+        for j, bf in enumerate([f for f in brand_fields if not f.endswith(": ")][:4]):
+            txt(s, bf, Inches(0.45), Inches(1.6+j*0.7), Inches(4.2), Inches(0.62), 10, color=light)
+        bar(s, Inches(5.0), Inches(1.15), Inches(4.7), Inches(3.95), mid_dark)
+        bar(s, Inches(5.0), Inches(1.15), Inches(4.7), Inches(0.05), accent)
+        txt(s, "TARGET AUDIENCE", Inches(5.15), Inches(1.23), Inches(4.4), Inches(0.3), 8, color=accent, bold=True)
+        aud_fields = [f"Audience: {brand.get('targetAudience','')[:65]}", f"Pain Points: {pain_points[:65]}", f"Aspirations: {aspirations[:65]}"]
+        for j, af in enumerate([f for f in aud_fields if not f.endswith(": ")][:4]):
+            txt(s, af, Inches(5.15), Inches(1.6+j*0.7), Inches(4.4), Inches(0.62), 10, color=light)
+        footer(s, 3)
+
+        # ── Slide 4: Social Media Audit ──
+        s = prs.slides.add_slide(blank); bg(s, dark)
+        slide_header(s, "03  ·  SOCIAL MEDIA AUDIT", "Where you stand today — real numbers.")
         if ig_connected and followers > 0:
             mode_label = f"Live Instagram data  ·  {ig_audit.get('posts_analysed', 0)} posts analysed"
         elif followers > 0:
             mode_label = f"Stored data ({followers:,} followers)  ·  Connect IG for live metrics"
         else:
             mode_label = "Launch Mode  ·  Targets based on brand brief + market research (connect IG for live metrics)"
-        txt(s, mode_label, Inches(0.4), Inches(0.95), Inches(9.2), Inches(0.3), 9, color=grey, italic=True)
-        kpi = ar.get("kpi_targets_90day") if isinstance(ar.get("kpi_targets_90day"), dict) else {}
-        kpi = kpi or {}
-        if ig_connected and followers > 0:
-            snap_stats = [
-                (f"{followers:,}",  "Current Followers",  brand_color),
-                (f"{avg_er}%",      "Avg Engagement Rate", green),
-                (f"{avg_reach:,}",  "Avg Reach / Post",   accent),
-                (ig_audit.get("best_content_type", "Reel"), "Best Format", RGBColor(0xF5,0x9E,0x0B)),
-                (str(ig_audit.get("posts_analysed", 0)), "Posts Analysed", white),
-            ]
-        elif followers > 0:
-            snap_stats = [
-                (f"{followers:,}",  "Current Followers",  brand_color),
-                (f"{goal:,}",       f"{days_ahead}-Day Target", green),
-                (f"+{gap:,}",       "Followers Needed",   accent),
-                (f"{feas.get('probability_pct', 70)}%", "Goal Probability", RGBColor(0xF5,0x9E,0x0B)),
-                ("Stored Data",     "Data Source",        white),
-            ]
-        else:
-            kpi_fol   = int(kpi.get("followers", 500) or 500)
-            kpi_er    = kpi.get("avg_engagement_rate", "3-5")
-            kpi_reels = kpi.get("reels_per_week", 3)
-            snap_stats = [
-                (f"{kpi_fol:,}",    f"{days_ahead}-Day Target", brand_color),
-                (f"{kpi_er}%",      "Target Engagement Rate",  green),
-                (f"{kpi_reels}/wk", "Reels Cadence",           accent),
-                (f"{feas.get('probability_pct', 70)}%", "Goal Probability", RGBColor(0xF5,0x9E,0x0B)),
-                ("Launch Phase",    "Account Status",          white),
-            ]
-        for i, (val, label, col) in enumerate(snap_stats):
+        txt(s, mode_label, Inches(0.4), Inches(0.95), Inches(9.2), Inches(0.28), 9, color=grey, italic=True)
+        snap_stats = [
+            (f"{followers:,}", "Followers", brand_color), (f"{avg_er}%", "Eng. Rate", green),
+            (f"{avg_reach:,}", "Avg Reach", accent), (ig_audit.get("best_content_type","Reel"), "Best Format", amber),
+            (str(ig_audit.get("posts_analysed",0)), "Posts Analysed", white),
+        ]
+        for i, (val, lbl, col) in enumerate(snap_stats):
             x = Inches(0.3 + i * 1.9)
-            bar(s, x, Inches(1.35), Inches(1.8), Inches(2.0), mid_dark)
-            bar(s, x, Inches(1.35), Inches(1.8), Inches(0.05), col)
-            txt(s, str(val), x + Inches(0.12), Inches(1.52), Inches(1.58), Inches(0.75), 20, bold=True, color=col, align=PP_ALIGN.CENTER)
-            txt(s, label, x + Inches(0.05), Inches(2.27), Inches(1.7), Inches(0.35), 9, color=grey, align=PP_ALIGN.CENTER)
-        audience     = brand.get("targetAudience", "") or ""
-        pillar_list  = brand.get("contentPillars") or []
-        bar(s, Inches(0.3), Inches(3.65), Inches(4.6), Inches(1.45), mid_dark)
-        txt(s, "TARGET AUDIENCE", Inches(0.45), Inches(3.72), Inches(4.2), Inches(0.3), 8, color=accent, bold=True)
-        txt(s, str(audience)[:200] or "See brand brief", Inches(0.45), Inches(4.0), Inches(4.3), Inches(0.9), 10, color=light)
-        bar(s, Inches(5.1), Inches(3.65), Inches(4.6), Inches(1.45), mid_dark)
-        txt(s, "CONTENT PILLARS", Inches(5.25), Inches(3.72), Inches(4.2), Inches(0.3), 8, color=brand_color, bold=True)
-        pillars_text = "  ·  ".join(str(p)[:28] for p in pillar_list[:4]) if pillar_list else "See strategy below"
-        txt(s, pillars_text, Inches(5.25), Inches(4.0), Inches(4.3), Inches(0.9), 10, color=light)
-        footer(s, 2)
-
-        # ── Slide 3: Performance Diagnosis ──
-        s = prs.slides.add_slide(blank); bg(s, dark)
-        bar(s, 0, 0, Inches(10), Inches(0.06), brand_color)
-        txt(s, "02  ·  PERFORMANCE DIAGNOSIS", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
-        txt(s, "What the data is telling us.", Inches(0.4), Inches(0.55), Inches(9), Inches(0.5), 20, bold=True)
-        diag = strategy.get("performance_diagnosis") or {}
-        sections_3 = [
-            ("WHAT'S WORKING",        green,                      diag.get("whats_working")       or strategy.get("what_works")   or ["Top posts show strong ER"],        Inches(0.3),  Inches(1.15)),
-            ("WHAT'S FAILING",        red,                        diag.get("whats_failing")       or strategy.get("what_to_stop") or ["Low-engagement formats"],           Inches(5.1),  Inches(1.15)),
-            ("MISSED OPPORTUNITIES",  RGBColor(0xF5,0x9E,0x0B),  diag.get("missed_opportunities") or ["Untapped trending formats"], Inches(0.3),  Inches(3.15)),
-            ("BOTTLENECKS",           accent,                     diag.get("bottlenecks")          or ["Posting frequency inconsistency"], Inches(5.1),  Inches(3.15)),
-        ]
-        for title, col, items, x, y in sections_3:
-            bar(s, x, y, Inches(4.6), Inches(1.9), mid_dark)
-            bar(s, x, y, Inches(4.6), Inches(0.05), col)
-            txt(s, title, x + Inches(0.15), y + Inches(0.1), Inches(4.2), Inches(0.3), 8, color=col, bold=True)
-            for j, item in enumerate(items[:3]):
-                txt(s, f"• {str(item)[:78]}", x + Inches(0.15), y + Inches(0.45 + j * 0.44), Inches(4.3), Inches(0.38), 10, color=light)
-        footer(s, 3)
-
-        # ── Slide 4: Competitor Intelligence ──
-        s = prs.slides.add_slide(blank); bg(s, dark)
-        bar(s, 0, 0, Inches(10), Inches(0.06), brand_color)
-        txt(s, "03  ·  COMPETITOR INTELLIGENCE", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
-        txt(s, "Who you're up against — and where you win.", Inches(0.4), Inches(0.55), Inches(9), Inches(0.5), 20, bold=True)
-        diff_strat = cd.get("differentiation_strategy") or ""
-        if diff_strat:
-            txt(s, f'"{str(diff_strat)[:200]}"', Inches(0.4), Inches(1.05), Inches(9.2), Inches(0.45), 10, color=grey, italic=True)
-        comp_adv    = strategy.get("competitor_advantage") or []
-        comp_gaps   = cd.get("content_gaps") or cd.get("gaps_to_fill") or []
-        formats_own = cd.get("content_formats_to_own") or []
-        col4_items  = [
-            ("OUR DIFFERENTIATORS",      brand_color, comp_adv[:3]    or ["Stronger storytelling", "Deeper niche expertise", "Community-first approach"]),
-            ("COMPETITOR GAPS TO FILL",  green,       comp_gaps[:3]   or ["Underserved audience segments", "Missing educational content", "No UGC strategy"]),
-            ("FORMATS WE WILL OWN",      accent,      formats_own[:3] or ["Educational Reels", "Behind-the-scenes Stories", "Community Carousels"]),
-        ]
-        for i, (title, col, items) in enumerate(col4_items):
-            x = Inches(0.3 + i * 3.2)
-            bar(s, x, Inches(1.6), Inches(3.0), Inches(3.6), mid_dark)
-            bar(s, x, Inches(1.6), Inches(3.0), Inches(0.05), col)
-            txt(s, title, x + Inches(0.12), Inches(1.72), Inches(2.8), Inches(0.35), 8, color=col, bold=True)
-            for j, item in enumerate(items[:4]):
-                txt(s, f"→ {str(item)[:58]}", x + Inches(0.12), Inches(2.12 + j * 0.6), Inches(2.8), Inches(0.55), 10, color=light)
+            bar(s, x, Inches(1.28), Inches(1.78), Inches(1.75), mid_dark)
+            bar(s, x, Inches(1.28), Inches(1.78), Inches(0.05), col)
+            txt(s, val, x+Inches(0.1), Inches(1.44), Inches(1.6), Inches(0.72), 20, bold=True, color=col, align=PP_ALIGN.CENTER)
+            txt(s, lbl, x+Inches(0.05), Inches(2.18), Inches(1.7), Inches(0.3), 9, color=grey, align=PP_ALIGN.CENTER)
+        cm = strategy.get("content_mix") or {}
+        bar(s, Inches(0.3), Inches(3.18), Inches(9.4), Inches(1.62), mid_dark)
+        txt(s, "CONTENT TYPE MIX", Inches(0.45), Inches(3.26), Inches(9), Inches(0.3), 8, color=brand_color, bold=True)
+        ct_hex = {"Reel":"3B82F6","AI Reel":"EC4899","Carousel":"10B981","Graphic":"A78BFA","Story":"F59E0B"}
+        for i, (ct, pct) in enumerate(list(cm.items())[:5]):
+            x = Inches(0.45 + i * 1.85)
+            col_h = hex_to_rgb(ct_hex.get(ct, "6C3CE1"))
+            txt(s, ct, x, Inches(3.6), Inches(1.7), Inches(0.3), 9, bold=True, color=col_h)
+            txt(s, f"{pct}%", x, Inches(3.92), Inches(1.7), Inches(0.5), 18, bold=True, color=col_h)
         footer(s, 4)
 
-        # ── Slide 5: Market Gap Analysis ──
+        # ── Slide 5: Content Performance — What's Working ──
         s = prs.slides.add_slide(blank); bg(s, dark)
-        bar(s, 0, 0, Inches(10), Inches(0.06), brand_color)
-        txt(s, "04  ·  MARKET GAP ANALYSIS", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
-        txt(s, "Where the opportunity lives.", Inches(0.4), Inches(0.55), Inches(9), Inches(0.5), 20, bold=True)
-        trends_list = rd.get("trending_angles") or [t.get("title","") for t in rd.get("trends",[])[:4]]
-        pain_list   = rd.get("audience_pain_insights") or []
-        audience_pain_brand = brand.get("audiencePainPoints","")
-        gap5_sections = [
-            ("CONTENT GAPS",          accent,                     comp_gaps[:3]   or ["Lacking educational series", "No long-form value content"]),
-            ("AUDIENCE GAPS",         green,                      pain_list[:3]   or ([audience_pain_brand] if audience_pain_brand else ["Unaddressed pain points in niche"])),
-            ("TREND OPPORTUNITIES",   RGBColor(0xF5,0x9E,0x0B),  [str(t)[:70] for t in trends_list[:3]] or ["Trending formats in niche"]),
-            ("CATEGORY WEAKNESSES",   red,                        [str(g)[:70] for g in (cd.get("gaps_to_fill") or comp_gaps)[:3]] or ["Generic content dominates niche"]),
-        ]
-        for i, (title, col, items) in enumerate(gap5_sections):
-            row, col_x = divmod(i, 2)
-            x = Inches(0.3 + col_x * 4.8)
-            y = Inches(1.15 + row * 2.12)
-            bar(s, x, y, Inches(4.5), Inches(1.88), mid_dark)
-            bar(s, x, y, Inches(4.5), Inches(0.05), col)
-            txt(s, title, x + Inches(0.15), y + Inches(0.1), Inches(4.1), Inches(0.3), 8, color=col, bold=True)
-            for j, item in enumerate(items[:3]):
-                txt(s, f"• {str(item)[:68]}", x + Inches(0.15), y + Inches(0.45 + j * 0.44), Inches(4.2), Inches(0.38), 10, color=light)
+        slide_header(s, "04  ·  CONTENT PERFORMANCE — WHAT'S WORKING", "The formula behind your top-performing content.")
+        best_bd  = ep.get("content_best_breakdown") or {}
+        diag     = strategy.get("performance_diagnosis") or {}
+        working  = (diag.get("whats_working") or strategy.get("what_works") or [])[:4]
+        bar(s, Inches(0.3), Inches(1.15), Inches(4.5), Inches(3.95), mid_dark)
+        bar(s, Inches(0.3), Inches(1.15), Inches(4.5), Inches(0.05), green)
+        txt(s, "WHAT'S WORKING", Inches(0.45), Inches(1.23), Inches(4.2), Inches(0.3), 8, color=green, bold=True)
+        for j, item in enumerate(working[:4]):
+            txt(s, f"✓  {str(item)[:70]}", Inches(0.45), Inches(1.62+j*0.77), Inches(4.2), Inches(0.68), 10, color=light)
+        bar(s, Inches(5.0), Inches(1.15), Inches(4.7), Inches(3.95), mid_dark)
+        bar(s, Inches(5.0), Inches(1.15), Inches(4.7), Inches(0.05), accent)
+        txt(s, "REPLICABLE FORMULA", Inches(5.15), Inches(1.23), Inches(4.4), Inches(0.3), 8, color=accent, bold=True)
+        formula = []
+        if best_bd:
+            if best_bd.get("hook_pattern"): formula.append(f"Hook: {str(best_bd['hook_pattern'])[:65]}")
+            why = best_bd.get("why_it_worked")
+            if isinstance(why, list): formula.extend([str(w)[:65] for w in why[:2]])
+            elif why: formula.append(str(why)[:65])
+            if best_bd.get("replicable_formula"): formula.append(f"Formula: {str(best_bd['replicable_formula'])[:60]}")
+            if best_bd.get("recommended_frequency"): formula.append(f"Frequency: {best_bd['recommended_frequency']}")
+        formula = formula or (strategy.get("hook_strategy") or [])[:4]
+        for j, item in enumerate(formula[:4]):
+            txt(s, f"→  {str(item)[:70]}", Inches(5.15), Inches(1.62+j*0.77), Inches(4.4), Inches(0.68), 10, color=light)
         footer(s, 5)
 
-        # ── Slide 6: Content Pillar Breakdown ──
+        # ── Slide 6: Content Performance — What's Failing ──
         s = prs.slides.add_slide(blank); bg(s, dark)
-        bar(s, 0, 0, Inches(10), Inches(0.06), brand_color)
-        txt(s, "05  ·  CONTENT PILLAR BREAKDOWN", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
-        txt(s, "What to create — and how hard to push it.", Inches(0.4), Inches(0.55), Inches(9), Inches(0.5), 20, bold=True)
-        pillar_breakdown = strategy.get("pillar_breakdown") or []
-        if not pillar_breakdown and pillar_list:
-            pillar_breakdown = [
-                {"pillar": str(p), "current_performance": "medium", "growth_potential": "high",
-                 "recommended_frequency": "2x/week", "expected_impact": "Build authority in niche"}
-                for p in pillar_list[:4]
-            ]
-        header_cols = [("CONTENT PILLAR", Inches(0.3)), ("PERFORMANCE", Inches(3.85)),
-                       ("POTENTIAL", Inches(5.5)), ("FREQUENCY", Inches(6.95)), ("IMPACT", Inches(8.1))]
-        bar(s, Inches(0.3), Inches(1.15), Inches(9.4), Inches(0.38), RGBColor(0x1A, 0x10, 0x35))
-        for col_label, x in header_cols:
-            txt(s, col_label, x + Inches(0.08), Inches(1.19), Inches(1.5), Inches(0.3), 7, color=accent, bold=True)
-        perf_colors = {"high": green, "medium": RGBColor(0xF5,0x9E,0x0B), "low": red}
-        for i, pb in enumerate(pillar_breakdown[:4]):
-            y = Inches(1.58 + i * 0.88)
-            row_bg = mid_dark if i % 2 == 0 else RGBColor(0x16, 0x10, 0x30)
-            bar(s, Inches(0.3), y, Inches(9.4), Inches(0.82), row_bg)
-            perf = str(pb.get("current_performance", "medium")).lower()
-            pot  = str(pb.get("growth_potential", "high")).lower()
-            freq = str(pb.get("recommended_frequency", "2x/week"))[:15]
-            imp  = str(pb.get("expected_impact", ""))[:55]
-            pillar_name = str(pb.get("pillar", ""))[:45]
-            txt(s, pillar_name, Inches(0.42), y + Inches(0.08), Inches(3.3), Inches(0.65), 11, color=white)
-            txt(s, perf.upper(), Inches(3.95), y + Inches(0.18), Inches(1.4), Inches(0.45), 11, bold=True, color=perf_colors.get(perf, white))
-            txt(s, pot.upper(),  Inches(5.58), y + Inches(0.18), Inches(1.3), Inches(0.45), 11, bold=True, color=perf_colors.get(pot, white))
-            txt(s, freq,         Inches(7.02), y + Inches(0.18), Inches(1.0), Inches(0.45), 11, color=accent)
-            txt(s, imp,          Inches(8.17), y + Inches(0.08), Inches(1.45), Inches(0.65), 9, color=grey)
+        slide_header(s, "05  ·  CONTENT PERFORMANCE — WHAT'S FAILING", "Stop doing this. Pivot here instead.")
+        worst_bd = ep.get("content_worst_breakdown") or {}
+        failing  = (diag.get("whats_failing") or strategy.get("what_to_stop") or [])[:4]
+        bar(s, Inches(0.3), Inches(1.15), Inches(4.5), Inches(3.95), mid_dark)
+        bar(s, Inches(0.3), Inches(1.15), Inches(4.5), Inches(0.05), red)
+        txt(s, "WHAT'S FAILING", Inches(0.45), Inches(1.23), Inches(4.2), Inches(0.3), 8, color=red, bold=True)
+        for j, item in enumerate(failing[:4]):
+            txt(s, f"✗  {str(item)[:70]}", Inches(0.45), Inches(1.62+j*0.77), Inches(4.2), Inches(0.68), 10, color=light)
+        bar(s, Inches(5.0), Inches(1.15), Inches(4.7), Inches(3.95), mid_dark)
+        bar(s, Inches(5.0), Inches(1.15), Inches(4.7), Inches(0.05), green)
+        txt(s, "DO THIS INSTEAD", Inches(5.15), Inches(1.23), Inches(4.4), Inches(0.3), 8, color=green, bold=True)
+        pivot = []
+        if worst_bd:
+            wf = worst_bd.get("why_it_failed")
+            if isinstance(wf, list): pivot.extend([str(w)[:65] for w in wf[:2]])
+            elif wf: pivot.append(str(wf)[:65])
+            if worst_bd.get("what_to_do_instead"): pivot.append(f"→ {str(worst_bd['what_to_do_instead'])[:65]}")
+        pivot = pivot or (diag.get("missed_opportunities") or strategy.get("content_series_ideas") or [])[:4]
+        for j, item in enumerate(pivot[:4]):
+            txt(s, f"→  {str(item)[:70]}", Inches(5.15), Inches(1.62+j*0.77), Inches(4.4), Inches(0.68), 10, color=light)
         footer(s, 6)
 
-        # ── Slide 7: Follower Goal Strategy ──
+        # ── Slide 7: Market Research & Industry Trends ──
         s = prs.slides.add_slide(blank); bg(s, dark)
-        bar(s, 0, 0, Inches(10), Inches(0.06), brand_color)
-        txt(s, "06  ·  FOLLOWER GOAL STRATEGY", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
-        txt(s, "The math behind your growth target.", Inches(0.4), Inches(0.55), Inches(9), Inches(0.5), 20, bold=True)
-        accel   = feas.get("acceleration_needed", 1.0)
-        prob    = feas.get("probability_pct", 70)
+        slide_header(s, "06  ·  MARKET RESEARCH & INDUSTRY TRENDS", "What's happening in your market right now.")
+        trends_list = rd.get("trending_angles") or [str(t.get("title","")) for t in rd.get("trends",[])[:4]]
+        pain_list   = rd.get("audience_pain_insights") or []
+        opps_list7  = rd.get("content_opportunities") or rd.get("hook_ideas") or []
+        sec7 = [
+            ("TRENDING CONTENT ANGLES", accent, [str(t)[:65] for t in trends_list[:3]]),
+            ("AUDIENCE PAIN INSIGHTS",  green,  [str(p)[:65] for p in (pain_list or [brand.get("audiencePainPoints","Unaddressed pain points")])[:3]]),
+            ("CONTENT OPPORTUNITIES",   amber,  [str(o)[:65] for o in opps_list7[:3]]),
+        ]
+        for i, (title, col, items) in enumerate(sec7):
+            x = Inches(0.3 + i * 3.2)
+            bar(s, x, Inches(1.15), Inches(3.0), Inches(3.95), mid_dark)
+            bar(s, x, Inches(1.15), Inches(3.0), Inches(0.05), col)
+            txt(s, title, x+Inches(0.12), Inches(1.23), Inches(2.8), Inches(0.3), 8, color=col, bold=True)
+            for j, item in enumerate((items or ["See research notes"])[:4]):
+                txt(s, f"• {item}", x+Inches(0.12), Inches(1.62+j*0.78), Inches(2.8), Inches(0.7), 10, color=light)
+        footer(s, 7)
+
+        # ── Slide 8: Social Media Trends ──
+        s = prs.slides.add_slide(blank); bg(s, dark)
+        slide_header(s, "07  ·  SOCIAL MEDIA TRENDS", "What's working on Instagram right now — and why.")
+        sm_trends = ep.get("social_media_trends") or [
+            {"trend": "POV / First-person Reels", "why_it_works": "Creates immediate audience identification", "how_to_use": f"Show behind-the-scenes from founder perspective in {niche}"},
+            {"trend": "Educational Carousels with data hooks", "why_it_works": "Drives saves (saves = strong algorithmic signal)", "how_to_use": f"Myth-busting series specific to {niche}"},
+            {"trend": "Trend-jacking with niche POV", "why_it_works": "Borrows reach from trending audio/format", "how_to_use": f"Apply viral audio to {niche} content"},
+            {"trend": "Story-based transformation Reels", "why_it_works": "Emotional arc keeps viewers to the end", "how_to_use": f"Before/after results in {niche}"},
+        ]
+        for i, t in enumerate(sm_trends[:4]):
+            row, ci = divmod(i, 2)
+            x = Inches(0.3 + ci * 4.8); y = Inches(1.15 + row * 2.12)
+            tn  = str(t.get("trend","") or t)[:55]
+            why = str(t.get("why_it_works",""))[:70]
+            how_key = next((k for k in (t.keys() if isinstance(t, dict) else []) if "how" in k.lower()), None)
+            how = str(t.get(how_key,""))[:70] if how_key else ""
+            bar(s, x, y, Inches(4.5), Inches(1.88), mid_dark)
+            bar(s, x, y, Inches(4.5), Inches(0.05), accent)
+            txt(s, tn,  x+Inches(0.15), y+Inches(0.1),  Inches(4.1), Inches(0.32), 11, bold=True, color=white)
+            txt(s, f"Why: {why}", x+Inches(0.15), y+Inches(0.48), Inches(4.1), Inches(0.32), 9, color=grey)
+            if how: txt(s, f"Use: {how}", x+Inches(0.15), y+Inches(0.84), Inches(4.1), Inches(0.32), 9, color=light)
+        footer(s, 8)
+
+        # ── Slide 9: Competitor Intelligence ──
+        s = prs.slides.add_slide(blank); bg(s, dark)
+        slide_header(s, "08  ·  COMPETITOR INTELLIGENCE", "Who you're up against — and where you win.")
+        diff_strat = cd.get("differentiation_strategy") or ""
+        if diff_strat:
+            txt(s, f'"{str(diff_strat)[:200]}"', Inches(0.4), Inches(1.05), Inches(9.2), Inches(0.4), 10, color=grey, italic=True)
+        comp_adv    = strategy.get("competitor_advantage") or []
+        comp_gaps9  = cd.get("content_gaps") or cd.get("gaps_to_fill") or []
+        formats_own = cd.get("content_formats_to_own") or []
+        col9_items  = [
+            ("OUR DIFFERENTIATORS",    brand_color, comp_adv[:3]   or ["Stronger storytelling","Deeper niche expertise","Community-first"]),
+            ("COMPETITOR GAPS TO FILL",green,       comp_gaps9[:3] or ["Underserved audience","Missing educational","No UGC strategy"]),
+            ("FORMATS WE WILL OWN",    accent,      formats_own[:3] or ["Educational Reels","BTS Stories","Community Carousels"]),
+        ]
+        y9 = Inches(1.55) if diff_strat else Inches(1.2)
+        for i, (title, col, items) in enumerate(col9_items):
+            x = Inches(0.3 + i * 3.2)
+            bar(s, x, y9, Inches(3.0), Inches(3.6), mid_dark)
+            bar(s, x, y9, Inches(3.0), Inches(0.05), col)
+            txt(s, title, x+Inches(0.12), y9+Inches(0.1), Inches(2.8), Inches(0.32), 8, color=col, bold=True)
+            for j, item in enumerate(items[:4]):
+                txt(s, f"→ {str(item)[:56]}", x+Inches(0.12), y9+Inches(0.5+j*0.62), Inches(2.8), Inches(0.55), 10, color=light)
+        footer(s, 9)
+
+        # ── Slide 10: Competitor Gap Analysis ──
+        s = prs.slides.add_slide(blank); bg(s, dark)
+        slide_header(s, "09  ·  COMPETITOR GAP ANALYSIS", "Where the market is underserved — and how you can own it.")
+        gap_opps   = cd.get("gap_opportunities") or {}
+        opps10     = cd.get("opportunities") or []
+        rec_angles = cd.get("recommended_angles") or []
+        gap10 = [
+            ("TOPIC GAP",    accent, [str(gap_opps.get("topic_gap","Unaddressed topics in niche"))[:65]]),
+            ("FORMAT GAP",   green,  [str(gap_opps.get("format_gap","Effective formats competitors avoid"))[:65]]),
+            ("AUDIENCE GAP", amber,  [str(gap_opps.get("audience_gap","Sub-segment no one serves"))[:65]]),
+            ("TONE GAP",     red,    [str(gap_opps.get("tone_gap","Emotional register no one occupies"))[:65]]),
+        ]
+        for i, (title, col, items) in enumerate(gap10):
+            row, ci = divmod(i, 2)
+            x = Inches(0.3 + ci * 4.8); y = Inches(1.15 + row * 2.12)
+            bar(s, x, y, Inches(4.5), Inches(1.88), mid_dark)
+            bar(s, x, y, Inches(4.5), Inches(0.05), col)
+            txt(s, title, x+Inches(0.15), y+Inches(0.1), Inches(4.1), Inches(0.3), 8, color=col, bold=True)
+            for j, item in enumerate(items[:2]):
+                txt(s, f"• {item}", x+Inches(0.15), y+Inches(0.45+j*0.44), Inches(4.2), Inches(0.38), 10, color=light)
+            opp = opps10[i] if i < len(opps10) else (rec_angles[i] if i < len(rec_angles) else "")
+            if opp: txt(s, f"→ Opp: {str(opp)[:60]}", x+Inches(0.15), y+Inches(1.45), Inches(4.2), Inches(0.3), 9, color=col, italic=True)
+        footer(s, 10)
+
+        # ── Slide 11: Growth Gap Analysis ──
+        s = prs.slides.add_slide(blank); bg(s, dark)
+        slide_header(s, "10  ·  GROWTH GAP ANALYSIS", "Current state vs required state — the exact delta.")
         req_wk  = feas.get("required_weekly_growth", 0)
         req_day = feas.get("required_daily_growth", 0)
         est_wk  = feas.get("est_current_weekly_growth", 5)
-        proj    = feas.get("projected_growth_at_pace", 0)
-        f_risks = feas.get("risks", [])
-        data_mode = "Live IG data" if ig_connected else "Cold-start estimate"
-        math_cards = [
-            ("CURRENT",       f"{followers:,}", brand_color),
-            ("TARGET",        f"{goal:,}",      green),
-            ("GAP",           f"+{gap:,}",       red if gap > 0 else green),
-            ("NEED / WEEK",   str(req_wk),      RGBColor(0xF5,0x9E,0x0B)),
-            ("NEED / DAY",    str(req_day),     accent),
+        accel   = feas.get("acceleration_needed", 1.0)
+        rows11  = [
+            ("Followers",      f"{followers:,}",    f"{goal:,}",        f"+{gap:,}",            brand_color),
+            ("Weekly Growth",  f"{est_wk}/wk",       f"{req_wk}/wk",     f"{accel}x needed",     amber),
+            ("Daily Growth",   "—",                  f"{req_day}/day",    "—",                    accent),
+            ("Engagement Rate",f"{avg_er}%",          "3-5%",             "Industry benchmark",   green),
+            ("Avg Reach",      f"{avg_reach:,}",      f"{int(avg_reach*1.5):,}" if avg_reach else "—", "+50% target", grey),
         ]
-        for i, (lbl, val, col) in enumerate(math_cards):
-            x = Inches(0.3 + i * 1.9)
-            bar(s, x, Inches(1.1), Inches(1.78), Inches(1.65), mid_dark)
-            bar(s, x, Inches(1.1), Inches(1.78), Inches(0.05), col)
-            txt(s, lbl, x + Inches(0.1), Inches(1.18), Inches(1.6), Inches(0.3), 8, color=col, bold=True)
-            txt(s, str(val), x + Inches(0.1), Inches(1.5), Inches(1.6), Inches(0.65), 20, bold=True, color=col, align=PP_ALIGN.CENTER)
-        prob_col = green if prob >= 70 else (RGBColor(0xF5,0x9E,0x0B) if prob >= 40 else red)
-        bar(s, Inches(0.3), Inches(2.9), Inches(3.0), Inches(1.35), mid_dark)
-        txt(s, "SUCCESS PROBABILITY", Inches(0.42), Inches(2.98), Inches(2.8), Inches(0.3), 8, color=prob_col, bold=True)
-        txt(s, f"{prob}%", Inches(0.42), Inches(3.3), Inches(2.8), Inches(0.65), 28, bold=True, color=prob_col)
-        txt(s, f"{accel}x acceleration needed  ·  {data_mode}", Inches(0.42), Inches(3.9), Inches(2.8), Inches(0.25), 8, color=grey, italic=True)
-        bar(s, Inches(3.5), Inches(2.9), Inches(6.2), Inches(1.35), mid_dark)
-        txt(s, "RISKS & NON-NEGOTIABLES", Inches(3.62), Inches(2.98), Inches(5.9), Inches(0.3), 8, color=red, bold=True)
-        goal_strat = strategy.get("goal_strategy") or {}
-        nonneg     = goal_strat.get("non_negotiable_actions") or f_risks or ["Daily Reel posting for first 7 days"]
-        for j, item in enumerate(nonneg[:3]):
-            txt(s, f"⚡ {str(item)[:88]}", Inches(3.62), Inches(3.32 + j * 0.3), Inches(5.9), Inches(0.28), 9, color=light)
-        footer(s, 7)
+        bar(s, Inches(0.3), Inches(1.2), Inches(9.4), Inches(0.38), RGBColor(0x1A,0x10,0x35))
+        for ci, lbl in enumerate(["METRIC","CURRENT","REQUIRED","GAP"]):
+            txt(s, lbl, Inches(0.38+ci*2.35), Inches(1.26), Inches(2.3), Inches(0.28), 8, bold=True, color=accent)
+        for j, (metric, cur, req, gap_v, col) in enumerate(rows11):
+            y = Inches(1.62 + j * 0.72)
+            row_bg = mid_dark if j%2==0 else RGBColor(0x16,0x10,0x30)
+            bar(s, Inches(0.3), y, Inches(9.4), Inches(0.66), row_bg)
+            bar(s, Inches(0.3), y, Inches(0.05), Inches(0.66), col)
+            for ci, val in enumerate([metric, cur, req, gap_v]):
+                txt(s, str(val), Inches(0.4+ci*2.35), y+Inches(0.12), Inches(2.3), Inches(0.42), 12,
+                    bold=(ci==0), color=col if ci==0 else (light if ci<2 else amber))
+        footer(s, 11)
 
-        # ── Slide 8: Action Plan ──
+        # ── Slide 12: Growth Forecasting ──
         s = prs.slides.add_slide(blank); bg(s, dark)
-        bar(s, 0, 0, Inches(10), Inches(0.06), brand_color)
-        txt(s, "07  ·  ACTION PLAN", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
-        txt(s, "What to do — every single day.", Inches(0.4), Inches(0.55), Inches(9), Inches(0.5), 20, bold=True)
-        day_plan_all = strategy.get("day_by_day_plan") or []
-        day1 = day_plan_all[0] if day_plan_all else {}
-        tactics = strategy.get("growth_tactics") or []
-        platform_exp = strategy.get("platform_expansion") or {}
-        daily_actions = [
-            day1.get("content_task")    or "Post 1 brand Reel with strong hook",
-            day1.get("growth_task")     or "Engage with 10 niche accounts (like, comment)",
-            day1.get("engagement_task") or "Reply to all comments within 1 hour",
-            day1.get("community_task")  or "DM 5 new potential followers with value",
+        slide_header(s, "11  ·  GROWTH FORECASTING", "What's possible — all projections labeled as Estimates.")
+        gf = ep.get("growth_forecasting") or {}
+        txt(s, "All values below are ESTIMATES based on current trajectory + proposed strategy changes, not measured data.",
+            Inches(0.4), Inches(0.95), Inches(9.2), Inches(0.22), 8, color=amber, italic=True)
+        assumptions = gf.get("assumptions") or [
+            f"Estimate: consistent posting at {strategy.get('posting_frequency','1x daily')} required",
+            f"Assumption: ER maintained at {avg_er}% or above",
+            f"Assumption: algorithm reach improves with {feas.get('required_weekly_growth',5)} new followers/week",
         ]
-        weekly_actions = tactics[:4] or ["Content batch creation (3-5 posts)", "Story polls for audience feedback", "Weekly competitor audit", "Hashtag refresh and testing"]
-        platform_actions = [
-            f"Reels: {str(platform_exp.get('reels','Lead with Reels 3-5x/week'))[:65]}" if platform_exp.get('reels') else "Reels: 3-5 per week for maximum organic reach",
-            f"Stories: {str(platform_exp.get('stories','Daily behind-the-scenes'))[:65]}" if platform_exp.get('stories') else "Stories: Daily polls, Q&As, and behind-the-scenes",
-            f"Carousels: {str(platform_exp.get('carousels','Educational saves'))[:65]}" if platform_exp.get('carousels') else "Carousels: 1-2 per week optimised for saves",
-            f"Best posting times: {', '.join(str(t) for t in strategy.get('best_times', ['9AM','12PM','6PM'])[:3])}",
+        bar(s, Inches(0.3), Inches(1.22), Inches(9.4), Inches(0.38), RGBColor(0x1A,0x10,0x35))
+        for ci, lbl in enumerate(["SCENARIO","30 DAYS","60 DAYS","90 DAYS","180 DAYS"]):
+            txt(s, lbl, Inches(0.4+ci*1.87), Inches(1.28), Inches(1.82), Inches(0.28), 8, bold=True, color=accent)
+        row_scenarios = [("BEST CASE",green),("REALISTIC",accent),("WORST CASE",red)]
+        scenario_map  = {"BEST CASE":"best","REALISTIC":"realistic","WORST CASE":"worst"}
+        for ri, (lbl, col) in enumerate(row_scenarios):
+            y = Inches(1.64 + ri * 0.78)
+            bar(s, Inches(0.3), y, Inches(9.4), Inches(0.72), mid_dark if ri%2==0 else RGBColor(0x16,0x10,0x30))
+            bar(s, Inches(0.3), y, Inches(0.05), Inches(0.72), col)
+            txt(s, lbl, Inches(0.4), y+Inches(0.17), Inches(1.82), Inches(0.38), 10, bold=True, color=col)
+            sk = scenario_map[lbl]
+            for ci, pk in enumerate(("day30","day60","day90","day180")):
+                pd_data = gf.get(pk) or {}
+                v = pd_data.get(sk)
+                disp = f"{int(v):,}" if isinstance(v,(int,float)) and v else "—"
+                txt(s, disp, Inches(0.4+(ci+1)*1.87), y+Inches(0.17), Inches(1.8), Inches(0.38), 12, bold=True, color=col)
+        bar(s, Inches(0.3), Inches(4.06), Inches(9.4), Inches(0.88), mid_dark)
+        txt(s, "KEY ASSUMPTIONS", Inches(0.45), Inches(4.14), Inches(9), Inches(0.28), 8, bold=True, color=amber)
+        txt(s, "  ·  ".join(str(a)[:55] for a in assumptions[:3]),
+            Inches(0.45), Inches(4.42), Inches(9.1), Inches(0.45), 9, color=grey, italic=True)
+        footer(s, 12)
+
+        # ── Slide 13: Performance Diagnosis ──
+        s = prs.slides.add_slide(blank); bg(s, dark)
+        slide_header(s, "12  ·  PERFORMANCE DIAGNOSIS", "What the data is telling us.")
+        diag13 = strategy.get("performance_diagnosis") or {}
+        sec13  = [
+            ("WHAT'S WORKING",        green, diag13.get("whats_working")       or strategy.get("what_works")   or ["Top posts show strong ER"]),
+            ("WHAT'S FAILING",        red,   diag13.get("whats_failing")       or strategy.get("what_to_stop") or ["Low-engagement formats"]),
+            ("MISSED OPPORTUNITIES",  amber, diag13.get("missed_opportunities") or ["Untapped trending formats"]),
+            ("BOTTLENECKS",           accent,diag13.get("bottlenecks")          or ["Posting frequency inconsistency"]),
         ]
-        action_cols = [
-            ("DAILY ACTIONS",    brand_color, daily_actions),
-            ("WEEKLY ACTIONS",   green,       weekly_actions),
-            ("PLATFORM-SPECIFIC", accent,     platform_actions),
+        for i, (title, col, items) in enumerate(sec13):
+            row, ci = divmod(i, 2)
+            x = Inches(0.3+ci*4.8); y = Inches(1.15+row*2.12)
+            bar(s, x, y, Inches(4.5), Inches(1.88), mid_dark)
+            bar(s, x, y, Inches(4.5), Inches(0.05), col)
+            txt(s, title, x+Inches(0.15), y+Inches(0.1), Inches(4.1), Inches(0.3), 8, color=col, bold=True)
+            for j, item in enumerate(items[:3]):
+                txt(s, f"• {str(item)[:68]}", x+Inches(0.15), y+Inches(0.45+j*0.44), Inches(4.2), Inches(0.38), 10, color=light)
+        footer(s, 13)
+
+        # ── Slide 14: Growth Strategy ──
+        s = prs.slides.add_slide(blank); bg(s, dark)
+        slide_header(s, "13  ·  GROWTH STRATEGY", "What to do, why to do it, and when.")
+        goal_strat  = strategy.get("goal_strategy") or {}
+        narrative14 = str(goal_strat.get("narrative",""))[:280]
+        if narrative14:
+            bar(s, Inches(0.3), Inches(1.1), Inches(9.4), Inches(0.52), mid_dark)
+            txt(s, narrative14, Inches(0.45), Inches(1.14), Inches(9.1), Inches(0.45), 10, color=light, italic=True)
+        roadmap_d = strategy.get("roadmap") or {}
+        horizons  = [
+            ("QUICK WINS (1-7 DAYS)", brand_color, roadmap_d.get("quick_wins") or (strategy.get("growth_tactics") or [])[:2]),
+            ("30 DAYS",               green,        roadmap_d.get("short_term") or (strategy.get("growth_tactics") or [])[2:4]),
+            ("90 DAYS",               accent,       roadmap_d.get("mid_term")   or (strategy.get("monthly_themes") or [])[:2]),
         ]
-        for i, (col_title, col, items) in enumerate(action_cols):
-            x = Inches(0.3 + i * 3.2)
-            bar(s, x, Inches(1.15), Inches(3.0), Inches(4.2), mid_dark)
+        y14 = Inches(1.72) if narrative14 else Inches(1.2)
+        for i, (title, col, items) in enumerate(horizons):
+            x = Inches(0.3+i*3.2)
+            bar(s, x, y14, Inches(3.0), Inches(3.3), mid_dark)
+            bar(s, x, y14, Inches(3.0), Inches(0.05), col)
+            txt(s, title, x+Inches(0.12), y14+Inches(0.1), Inches(2.8), Inches(0.32), 8, color=col, bold=True)
+            for j, item in enumerate(items[:4] if isinstance(items,list) else [items]):
+                action = str(item.get("action","") if isinstance(item,dict) else item)[:58]
+                txt(s, f"→ {action}", x+Inches(0.12), y14+Inches(0.5+j*0.65), Inches(2.8), Inches(0.58), 10, color=light)
+        footer(s, 14)
+
+        # ── Slide 15: Recommendations with Evidence ──
+        s = prs.slides.add_slide(blank); bg(s, dark)
+        slide_header(s, "14  ·  RECOMMENDATIONS — DATA-BACKED", "Every recommendation tied to evidence. No generic advice.")
+        struct_recs = ep.get("structured_recommendations") or []
+        if not struct_recs:
+            pa = strategy.get("priority_actions") or []
+            struct_recs = [{"title": str(r.get("action",""))[:70],
+                            "evidence": [str(r.get("why_it_matters",""))],
+                            "expected_impact": str(r.get("expected_impact","")),
+                            "priority": "P1", "difficulty": str(r.get("difficulty","medium")),
+                            "timeline": str(r.get("timeline",""))} for r in pa[:5]]
+        diff_col_map = {"low": green, "medium": amber, "high": red}
+        for i, rec in enumerate(struct_recs[:6]):
+            y = Inches(1.1 + i * 0.72)
+            bar(s, Inches(0.4), y, Inches(9.2), Inches(0.63), mid_dark)
+            bar(s, Inches(0.4), y, Inches(0.05), Inches(0.63), brand_color)
+            title_r  = str(rec.get("title",""))[:92]
+            evidence = rec.get("evidence") or []
+            evid_str = " · ".join(str(e)[:42] for e in evidence[:2]) if evidence else ""
+            diff     = str(rec.get("difficulty","")).lower()
+            tline    = str(rec.get("timeline",""))
+            impact   = str(rec.get("expected_impact",""))[:52]
+            txt(s, title_r, Inches(0.55), y+Inches(0.05), Inches(7.5), Inches(0.28), 11, bold=True, color=white)
+            meta = "  ·  ".join(m for m in [evid_str, f"→ {impact}" if impact else "", tline] if m)
+            txt(s, meta[:130], Inches(0.55), y+Inches(0.35), Inches(8.8), Inches(0.22), 8,
+                color=diff_col_map.get(diff, grey), italic=True)
+        footer(s, 15)
+
+        # ── Slide 16: Content Pillar Breakdown ──
+        s = prs.slides.add_slide(blank); bg(s, dark)
+        slide_header(s, "15  ·  CONTENT PILLAR BREAKDOWN", "What to create — and how hard to push each pillar.")
+        pillar_breakdown = strategy.get("pillar_breakdown") or []
+        pillar_list = brand.get("contentPillars") or strategy.get("pillars") or []
+        if not pillar_breakdown and pillar_list:
+            pillar_breakdown = [{"pillar":str(p),"current_performance":"medium","growth_potential":"high",
+                                 "recommended_frequency":"2x/week","expected_impact":"Build authority in niche"}
+                                for p in pillar_list[:4]]
+        hdr_cols16 = [("CONTENT PILLAR",Inches(0.3)),("PERFORMANCE",Inches(3.85)),("POTENTIAL",Inches(5.5)),
+                      ("FREQUENCY",Inches(6.95)),("IMPACT",Inches(8.1))]
+        bar(s, Inches(0.3), Inches(1.15), Inches(9.4), Inches(0.38), RGBColor(0x1A,0x10,0x35))
+        for col_label, x in hdr_cols16:
+            txt(s, col_label, x+Inches(0.08), Inches(1.19), Inches(1.5), Inches(0.3), 7, color=accent, bold=True)
+        perf_col_map = {"high":green,"medium":amber,"low":red}
+        for i, pb in enumerate(pillar_breakdown[:4]):
+            y = Inches(1.57+i*0.9)
+            bar(s, Inches(0.3), y, Inches(9.4), Inches(0.84), mid_dark if i%2==0 else RGBColor(0x16,0x10,0x30))
+            perf = str(pb.get("current_performance","medium")).lower()
+            pot  = str(pb.get("growth_potential","high")).lower()
+            txt(s, str(pb.get("pillar",""))[:45], Inches(0.42), y+Inches(0.1), Inches(3.3), Inches(0.64), 11, color=white)
+            txt(s, perf.upper(), Inches(3.95), y+Inches(0.2), Inches(1.4), Inches(0.44), 11, bold=True, color=perf_col_map.get(perf,white))
+            txt(s, pot.upper(),  Inches(5.58), y+Inches(0.2), Inches(1.3), Inches(0.44), 11, bold=True, color=perf_col_map.get(pot,white))
+            txt(s, str(pb.get("recommended_frequency","2x/week"))[:15], Inches(7.02), y+Inches(0.2), Inches(1.0), Inches(0.44), 11, color=accent)
+            txt(s, str(pb.get("expected_impact",""))[:55], Inches(8.17), y+Inches(0.1), Inches(1.45), Inches(0.64), 9, color=grey)
+        footer(s, 16)
+
+        # ── Slide 17: Hook / Reel / Carousel Strategy ──
+        s = prs.slides.add_slide(blank); bg(s, dark)
+        slide_header(s, "16  ·  CONTENT STRATEGY — HOOKS, REELS & CAROUSELS", "The creative blueprint for every format.")
+        sec17 = [
+            ("HOOK STRATEGY",    brand_color, [str(h)[:58] for h in (strategy.get("hook_strategy") or [])[:3]]),
+            ("REEL RETENTION",   accent,      [str(r)[:58] for r in (strategy.get("retention_strategy") or strategy.get("content_series_ideas") or [])[:3]]),
+            ("CONVERSION MOVES", green,       [str(c)[:58] for c in (strategy.get("conversion_strategy") or strategy.get("cta_templates") or [])[:3]]),
+        ]
+        for i, (title, col, items) in enumerate(sec17):
+            x = Inches(0.3+i*3.2)
+            bar(s, x, Inches(1.15), Inches(3.0), Inches(4.0), mid_dark)
             bar(s, x, Inches(1.15), Inches(3.0), Inches(0.05), col)
-            txt(s, col_title, x + Inches(0.12), Inches(1.24), Inches(2.8), Inches(0.32), 8, color=col, bold=True)
-            for j, item in enumerate(items[:4]):
-                txt(s, f"• {str(item)[:70]}", x + Inches(0.12), Inches(1.6 + j * 0.83), Inches(2.8), Inches(0.76), 10, color=light)
-        footer(s, 8)
+            txt(s, title, x+Inches(0.12), Inches(1.23), Inches(2.8), Inches(0.32), 8, color=col, bold=True)
+            for j, item in enumerate((items or ["See strategy brief"])[:4]):
+                txt(s, f"→ {item}", x+Inches(0.12), Inches(1.6+j*0.85), Inches(2.8), Inches(0.78), 10, color=light)
+        footer(s, 17)
 
-        # ── Slide 9: Execution Timeline ──
+        # ── Slide 18: 30-Day Execution Plan ──
         s = prs.slides.add_slide(blank); bg(s, dark)
-        bar(s, 0, 0, Inches(10), Inches(0.06), brand_color)
-        txt(s, "08  ·  EXECUTION TIMELINE", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
-        horizon_label = f"{days_ahead}-Day Day-by-Day Plan" if days_ahead <= 21 else f"{days_ahead}-Day Weekly Roadmap"
-        txt(s, horizon_label, Inches(0.4), Inches(0.55), Inches(9), Inches(0.5), 20, bold=True)
-        week_plan = strategy.get("weekly_plan") or []
-        if day_plan_all and days_ahead <= 21:
-            week_groups  = [day_plan_all[:5], day_plan_all[5:10], day_plan_all[10:15]]
-            week_labels  = ["WEEK 1 — DAYS 1–5", "WEEK 2 — DAYS 6–10", "WEEK 3 — DAYS 11–15"]
-            week_colors  = [brand_color, green, accent]
-            for i, (wg, wl, wc) in enumerate(zip(week_groups, week_labels, week_colors)):
-                x = Inches(0.3 + i * 3.2)
-                bar(s, x, Inches(1.15), Inches(3.0), Inches(4.2), mid_dark)
-                bar(s, x, Inches(1.15), Inches(3.0), Inches(0.05), wc)
-                txt(s, wl, x + Inches(0.12), Inches(1.24), Inches(2.8), Inches(0.32), 7, color=wc, bold=True)
-                for j, day in enumerate(wg[:5]):
-                    dy = Inches(1.62 + j * 0.72)
-                    bar(s, x + Inches(0.05), dy, Inches(2.88), Inches(0.66), RGBColor(0x1A, 0x10, 0x35))
-                    day_num = day.get("day", i * 5 + j + 1)
-                    ctask   = str(day.get("content_task") or "")[:44]
-                    kpi_t   = str(day.get("kpi_target") or "")[:28]
-                    txt(s, f"Day {day_num}", x + Inches(0.12), dy + Inches(0.04), Inches(0.7), Inches(0.24), 8, color=wc, bold=True)
-                    txt(s, ctask,  x + Inches(0.12), dy + Inches(0.27), Inches(2.65), Inches(0.22), 8, color=light)
-                    txt(s, kpi_t,  x + Inches(0.12), dy + Inches(0.49), Inches(2.65), Inches(0.17), 7, color=grey)
-        elif week_plan:
-            for i, wk in enumerate(week_plan[:4]):
-                wc = [brand_color, green, accent, RGBColor(0xF5,0x9E,0x0B)][i % 4]
-                x  = Inches(0.3 + i * 2.4)
-                bar(s, x, Inches(1.15), Inches(2.2), Inches(4.2), mid_dark)
-                bar(s, x, Inches(1.15), Inches(2.2), Inches(0.05), wc)
-                txt(s, f"WEEK {wk.get('week', i+1)}", x + Inches(0.12), Inches(1.24), Inches(2.0), Inches(0.32), 8, color=wc, bold=True)
-                txt(s, str(wk.get("theme",""))[:35],         x + Inches(0.12), Inches(1.6),  Inches(2.0), Inches(0.38), 12, bold=True, color=white)
-                txt(s, str(wk.get("content_tasks",""))[:80], x + Inches(0.12), Inches(2.02), Inches(2.0), Inches(1.1),  10, color=light)
-                txt(s, f"KPI: {str(wk.get('kpi_target',''))[:42]}", x + Inches(0.12), Inches(3.18), Inches(2.0), Inches(0.35), 9, color=wc)
+        slide_header(s, "17  ·  30-DAY EXECUTION PLAN", "Day-by-day: what to post, why, and what it achieves.")
+        cal30      = ep.get("execution_calendar_30") or []
+        day_plan30 = strategy.get("day_by_day_plan") or []
+        source30   = cal30 or day_plan30
+        if source30:
+            grps = [source30[:5], source30[5:10], source30[10:15]]
+            lbls = ["DAYS 1-5","DAYS 6-10","DAYS 11-15"]
+            cols = [brand_color, green, accent]
+            for i, (grp, lbl, col) in enumerate(zip(grps, lbls, cols)):
+                x = Inches(0.3+i*3.2)
+                bar(s, x, Inches(1.15), Inches(3.0), Inches(4.05), mid_dark)
+                bar(s, x, Inches(1.15), Inches(3.0), Inches(0.05), col)
+                txt(s, lbl, x+Inches(0.12), Inches(1.23), Inches(2.8), Inches(0.32), 8, color=col, bold=True)
+                for j, day in enumerate(grp[:5]):
+                    dy = Inches(1.62+j*0.69)
+                    bar(s, x+Inches(0.05), dy, Inches(2.88), Inches(0.63), RGBColor(0x1A,0x10,0x35))
+                    dn = day.get("day", i*5+j+1)
+                    rt = str(day.get("reel_topic","") or day.get("content_task",""))[:42]
+                    g  = str(day.get("goal","") or day.get("kpi_target",""))[:28]
+                    txt(s, f"Day {dn}", x+Inches(0.12), dy+Inches(0.05), Inches(0.7), Inches(0.22), 8, color=col, bold=True)
+                    txt(s, rt, x+Inches(0.12), dy+Inches(0.26), Inches(2.65), Inches(0.2), 8, color=light)
+                    txt(s, g,  x+Inches(0.12), dy+Inches(0.46), Inches(2.65), Inches(0.15), 7, color=grey)
         else:
-            follower_plan = strategy.get("follower_plan") or {}
-            if days_ahead <= 21:
-                # Short plan: show Day 5 / Day 10 / Day 15 / Goal milestones
-                milestone_keys   = ["day5", "day10", "day15", "goal"]
-                milestone_labels = [f"Day 5", f"Day 10", f"Day 15", f"Day {days_ahead}"]
-                for i, (mk, label) in enumerate(zip(milestone_keys, milestone_labels)):
-                    fraction = (i + 1) / 4
-                    val = follower_plan.get(mk, followers + int(gap * fraction))
-                    wc  = [brand_color, green, accent, RGBColor(0xF5,0x9E,0x0B)][i]
-                    x   = Inches(0.3 + i * 2.4)
-                    bar(s, x, Inches(1.15), Inches(2.2), Inches(2.0), mid_dark)
-                    bar(s, x, Inches(1.15), Inches(2.2), Inches(0.05), wc)
-                    txt(s, label, x + Inches(0.12), Inches(1.24), Inches(2.0), Inches(0.32), 8, color=wc, bold=True)
-                    txt(s, f"{val:,} followers", x + Inches(0.12), Inches(1.6), Inches(2.0), Inches(0.45), 14, bold=True, color=wc)
-            else:
-                for i, (wk, label) in enumerate(zip(["week1","week2","week3","week4"], ["Week 1","Week 2","Week 3","Week 4"])):
-                    val = follower_plan.get(wk, followers + int(gap / 4) * (i + 1))
-                    wc  = [brand_color, green, accent, RGBColor(0xF5,0x9E,0x0B)][i]
-                    x   = Inches(0.3 + i * 2.4)
-                    bar(s, x, Inches(1.15), Inches(2.2), Inches(2.0), mid_dark)
-                    bar(s, x, Inches(1.15), Inches(2.2), Inches(0.05), wc)
-                    txt(s, label, x + Inches(0.12), Inches(1.24), Inches(2.0), Inches(0.32), 8, color=wc, bold=True)
-                    txt(s, f"{val:,} followers", x + Inches(0.12), Inches(1.6), Inches(2.0), Inches(0.45), 14, bold=True, color=wc)
-            for j, t in enumerate((strategy.get("growth_tactics") or [])[:4]):
-                txt(s, f"• {t}", Inches(0.4), Inches(3.4 + j * 0.38), Inches(9.2), Inches(0.35), 10, color=light)
-        footer(s, 9)
+            for j, t in enumerate((strategy.get("growth_tactics") or [])[:5]):
+                txt(s, f"Week {j+1}: {str(t)[:100]}", Inches(0.4), Inches(1.5+j*0.72), Inches(9.2), Inches(0.65), 11, color=light)
+        footer(s, 18)
 
-        # ── Slide 10: KPIs & Success Metrics ──
+        # ── Slide 19: 60-Day Plan ──
         s = prs.slides.add_slide(blank); bg(s, dark)
-        bar(s, 0, 0, Inches(10), Inches(0.06), brand_color)
-        txt(s, "09  ·  KPIs & SUCCESS METRICS", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
-        txt(s, "How we measure winning.", Inches(0.4), Inches(0.55), Inches(9), Inches(0.5), 20, bold=True)
+        slide_header(s, "18  ·  60-DAY EXECUTION PLAN", "Weeks 5–8: compounding the momentum.")
+        weeks_5_12 = ep.get("execution_calendar_weeks_5_to_12") or strategy.get("weekly_plan") or []
+        wks_5_8    = [w for w in weeks_5_12 if isinstance(w,dict) and w.get("week",0) <= 8][:4] or weeks_5_12[:4]
+        wk_cols    = [brand_color, green, accent, amber]
+        if wks_5_8:
+            for i, wk in enumerate(wks_5_8[:4]):
+                wc = wk_cols[i%4]; x = Inches(0.3+i*2.4)
+                bar(s, x, Inches(1.15), Inches(2.2), Inches(4.05), mid_dark)
+                bar(s, x, Inches(1.15), Inches(2.2), Inches(0.05), wc)
+                txt(s, f"WEEK {wk.get('week',i+5)}", x+Inches(0.12), Inches(1.23), Inches(2.0), Inches(0.32), 8, color=wc, bold=True)
+                txt(s, str(wk.get("theme",""))[:35],  x+Inches(0.12), Inches(1.58), Inches(2.0), Inches(0.38), 12, bold=True, color=white)
+                txt(s, str(wk.get("reels","") or wk.get("content_tasks",""))[:80], x+Inches(0.12), Inches(2.0), Inches(2.0), Inches(1.0), 10, color=light)
+                txt(s, f"KPI: {str(wk.get('goal','') or wk.get('kpi_target',''))[:42]}", x+Inches(0.12), Inches(3.08), Inches(2.0), Inches(0.35), 9, color=wc)
+        else:
+            themes = strategy.get("monthly_themes") or []
+            fb60 = [
+                ("DAYS 31-45", brand_color, (strategy.get("growth_tactics") or [])[:2] + [themes[1] if len(themes)>1 else "Content acceleration phase"]),
+                ("DAYS 46-60", green,        ["Collabs + niche partnerships","Viral series continues"]),
+            ]
+            for i, (title, col, items) in enumerate(fb60):
+                x = Inches(0.3+i*4.8)
+                bar(s, x, Inches(1.2), Inches(4.5), Inches(3.85), mid_dark)
+                bar(s, x, Inches(1.2), Inches(4.5), Inches(0.05), col)
+                txt(s, title, x+Inches(0.15), Inches(1.28), Inches(4.2), Inches(0.3), 8, color=col, bold=True)
+                for j, item in enumerate(items[:4]):
+                    txt(s, f"→ {str(item)[:68]}", x+Inches(0.15), Inches(1.65+j*0.85), Inches(4.2), Inches(0.75), 10, color=light)
+        footer(s, 19)
+
+        # ── Slide 20: 90-Day Plan ──
+        s = prs.slides.add_slide(blank); bg(s, dark)
+        slide_header(s, "19  ·  90-DAY EXECUTION PLAN", "Weeks 9–12: build the moat — authority, audience, retention.")
+        wks_9_12 = [w for w in weeks_5_12 if isinstance(w,dict) and w.get("week",0) >= 9][:4]
+        if not wks_9_12 and len(weeks_5_12) > 4:
+            wks_9_12 = weeks_5_12[4:8]
+        if wks_9_12:
+            for i, wk in enumerate(wks_9_12[:4]):
+                wc = wk_cols[i%4]; x = Inches(0.3+i*2.4)
+                bar(s, x, Inches(1.15), Inches(2.2), Inches(4.05), mid_dark)
+                bar(s, x, Inches(1.15), Inches(2.2), Inches(0.05), wc)
+                txt(s, f"WEEK {wk.get('week',i+9)}", x+Inches(0.12), Inches(1.23), Inches(2.0), Inches(0.32), 8, color=wc, bold=True)
+                txt(s, str(wk.get("theme",""))[:35], x+Inches(0.12), Inches(1.58), Inches(2.0), Inches(0.38), 12, bold=True, color=white)
+                txt(s, str(wk.get("reels","") or wk.get("content_tasks",""))[:80], x+Inches(0.12), Inches(2.0), Inches(2.0), Inches(1.0), 10, color=light)
+                txt(s, f"KPI: {str(wk.get('goal','') or wk.get('kpi_target',''))[:42]}", x+Inches(0.12), Inches(3.08), Inches(2.0), Inches(0.35), 9, color=wc)
+        else:
+            fb90 = [
+                ("DAYS 61-75", accent, (strategy.get("viral_opportunities") or ["Authority Reels series","UGC campaign launch"])[:3]),
+                ("DAYS 76-90", amber,  (strategy.get("content_series_ideas") or ["Community spotlight","Monetisation readiness"])[:3]),
+            ]
+            for i, (title, col, items) in enumerate(fb90):
+                x = Inches(0.3+i*4.8)
+                bar(s, x, Inches(1.2), Inches(4.5), Inches(3.85), mid_dark)
+                bar(s, x, Inches(1.2), Inches(4.5), Inches(0.05), col)
+                txt(s, title, x+Inches(0.15), Inches(1.28), Inches(4.2), Inches(0.3), 8, color=col, bold=True)
+                for j, item in enumerate(items[:4]):
+                    txt(s, f"→ {str(item)[:68]}", x+Inches(0.15), Inches(1.65+j*0.85), Inches(4.2), Inches(0.75), 10, color=light)
+        footer(s, 20)
+
+        # ── Slide 21: KPIs & Success Metrics ──
+        s = prs.slides.add_slide(blank); bg(s, dark)
+        slide_header(s, "20  ·  KPIs & SUCCESS METRICS", "How we measure winning.")
         kpi_90 = strategy.get("kpi_targets_90day") or strategy.get("kpi_targets_30day") or ar.get("kpi_targets_90day") or {}
         if not isinstance(kpi_90, dict): kpi_90 = {}
         kpi_fol   = int(kpi_90.get("followers", goal) or goal)
         kpi_er    = kpi_90.get("avg_engagement_rate", "3-5")
-        kpi_reach = kpi_90.get("avg_reach", int(avg_reach * 1.5) if avg_reach else 1000)
+        kpi_reach = kpi_90.get("avg_reach", int(avg_reach*1.5) if avg_reach else 1000)
         kpi_reels = kpi_90.get("reels_per_week", 4)
         kpi_saves = kpi_90.get("saves_per_post", 20)
-        kpi_items = [
+        kpi_items21 = [
             ("FOLLOWER TARGET", f"{followers:,} → {kpi_fol:,}", brand_color),
             ("ENGAGEMENT RATE", f"{kpi_er}%",                   green),
             ("REACH PER POST",  f"{kpi_reach:,}+",              accent),
-            ("REELS / WEEK",    f"{kpi_reels}x",                RGBColor(0xF5,0x9E,0x0B)),
+            ("REELS / WEEK",    f"{kpi_reels}x",                amber),
             ("SAVES PER POST",  f"{kpi_saves}+",                RGBColor(0xEC,0x48,0x99)),
         ]
-        for i, (lbl, val, col) in enumerate(kpi_items):
-            x = Inches(0.3 + i * 1.9)
+        for i, (lbl, val, col) in enumerate(kpi_items21):
+            x = Inches(0.3+i*1.9)
             bar(s, x, Inches(1.3), Inches(1.8), Inches(3.3), mid_dark)
             bar(s, x, Inches(1.3), Inches(1.8), Inches(0.06), col)
             txt(s, lbl, x+Inches(0.1), Inches(1.42), Inches(1.6), Inches(0.3), 8, color=col, bold=True)
             txt(s, val, x+Inches(0.1), Inches(1.76), Inches(1.6), Inches(0.65), 16, bold=True)
-        posting_freq = strategy.get("posting_frequency", "1-2x daily")
-        best_times_list = strategy.get("best_times", ["9AM","12PM","6PM"])
-        txt(s, f"Posting frequency: {posting_freq}  ·  Best times: {', '.join(str(t) for t in best_times_list[:3])}",
+        txt(s, f"Posting frequency: {strategy.get('posting_frequency','1-2x daily')}  ·  Best times: {', '.join(str(t) for t in (strategy.get('best_times',['9AM','12PM','6PM']))[:3])}",
             Inches(0.4), Inches(4.78), Inches(9.2), Inches(0.35), 11, color=grey)
-        footer(s, 10)
+        footer(s, 21)
 
-        # ── Slide 11: Priority Recommendations ──
-        s = prs.slides.add_slide(blank); bg(s, dark)
-        bar(s, 0, 0, Inches(10), Inches(0.06), brand_color)
-        txt(s, "10  ·  PRIORITY RECOMMENDATIONS", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
-        txt(s, "Specific next steps, in priority order.", Inches(0.4), Inches(0.55), Inches(9), Inches(0.5), 20, bold=True)
-        # Prefer the consultant-grade structured actions (ordered, with impact /
-        # difficulty / timeline). Fall back to plain tactic strings, then defaults.
-        priority_actions = strategy.get("priority_actions") or []
-        diff_colors = {"low": green, "medium": RGBColor(0xF5,0x9E,0x0B), "high": red}
-        if isinstance(priority_actions, list) and priority_actions and isinstance(priority_actions[0], dict):
-            for i, pa in enumerate(priority_actions[:6]):
-                y = Inches(1.12 + i * 0.69)
-                bar(s, Inches(0.4), y, Inches(9.2), Inches(0.6), mid_dark)
-                bar(s, Inches(0.4), y, Inches(0.06), Inches(0.6), brand_color)
-                txt(s, str(i+1), Inches(0.56), y+Inches(0.13), Inches(0.38), Inches(0.4), 14, bold=True, color=brand_color)
-                action = str(pa.get("action", ""))[:108]
-                txt(s, action, Inches(0.96), y+Inches(0.05), Inches(8.5), Inches(0.32), 11, color=white)
-                pscore = pa.get("priority_score")
-                diff   = str(pa.get("difficulty", "")).lower()
-                tline  = str(pa.get("timeline", ""))
-                impact = str(pa.get("expected_impact", ""))[:60]
-                meta_bits = []
-                if pscore not in (None, ""): meta_bits.append(f"P{pscore}")
-                if diff:   meta_bits.append(diff.capitalize())
-                if tline:  meta_bits.append(tline)
-                if impact: meta_bits.append(f"→ {impact}")
-                txt(s, "  ·  ".join(meta_bits)[:120], Inches(0.96), y+Inches(0.36), Inches(8.5), Inches(0.22), 8,
-                    color=diff_colors.get(diff, grey))
-        else:
-            recs = strategy.get("growth_tactics") or [
-                "Increase posting frequency to 5-6 feed posts/week + daily stories",
-                "Lead with Reels — highest reach format for this niche",
-                "Launch a UGC/community challenge to build organic reach",
-                "Use strong hooks in the first 1-2 seconds of every Reel",
-                f"Post at peak times: {'  ·  '.join(str(t) for t in (strategy.get('best_times') or ['9AM','12PM','6PM'])[:3])}",
-                "Engage actively in comments for 30 minutes after each post",
-            ]
-            for i, rec in enumerate(recs[:6]):
-                y = Inches(1.15 + i * 0.68)
-                bar(s, Inches(0.4), y, Inches(9.2), Inches(0.58), mid_dark)
-                bar(s, Inches(0.4), y, Inches(0.06), Inches(0.58), brand_color)
-                txt(s, str(i+1), Inches(0.56), y+Inches(0.07), Inches(0.38), Inches(0.4), 14, bold=True, color=brand_color)
-                txt(s, str(rec)[:130], Inches(0.96), y+Inches(0.1), Inches(8.5), Inches(0.4), 11, color=light)
-        footer(s, 11)
-
-        # ── Slide 12: Outro ──
+        # ── Slide 22: Outro ──
         s = prs.slides.add_slide(blank); bg(s, dark)
         bar(s, 0, 0, Inches(0.06), prs.slide_height, brand_color)
-        txt(s, "Let's build.", Inches(0.4), Inches(1.7), Inches(9), Inches(1.3), 48, bold=True)
-        txt(s, "PerformEdge  ·  Social Growth Partners", Inches(0.4), Inches(3.15), Inches(9), Inches(0.5), 16, color=accent)
-        txt(s, name, Inches(0.4), Inches(3.8), Inches(9), Inches(0.45), 14, color=grey, italic=True)
-        txt(s, f"{days_ahead}-Day Strategy  ·  {month_str}", Inches(0.4), Inches(4.55), Inches(9), Inches(0.35), 12, color=RGBColor(0x4B,0x55,0x63))
+        txt(s, "Let's build.", Inches(0.4), Inches(1.6), Inches(9), Inches(1.3), 48, bold=True)
+        txt(s, "PerformEdge  ·  Social Growth Partners", Inches(0.4), Inches(3.05), Inches(9), Inches(0.5), 16, color=accent)
+        txt(s, name, Inches(0.4), Inches(3.7), Inches(9), Inches(0.45), 14, color=grey, italic=True)
+        txt(s, f"90-Day Strategy  ·  {month_str}  ·  Investor-Grade Report", Inches(0.4), Inches(4.45), Inches(9), Inches(0.35), 12, color=RGBColor(0x4B,0x55,0x63))
 
 
         # Serialize + upload
