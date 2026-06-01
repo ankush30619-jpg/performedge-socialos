@@ -10,7 +10,7 @@ import os
 import httpx
 from openai import AsyncOpenAI
 from state import SocialOSState
-from skills.registry import JTBD_FRAMEWORK
+from skills.registry import JTBD_FRAMEWORK, AUDIENCE_PAIN_MINING_2026
 
 # Lazy singletons
 _oai = None
@@ -277,7 +277,8 @@ async def _synthesise_research(
                         f"Your job is to synthesise raw research data into highly specific, actionable content insights "
                         f"that this brand can use immediately. Everything must be tailored to this brand's audience and voice. "
                         f"Avoid generic advice — be specific to {niche} and {target_audience}.\n\n"
-                        f"{JTBD_FRAMEWORK}"
+                        f"{JTBD_FRAMEWORK}\n\n"
+                        f"{AUDIENCE_PAIN_MINING_2026}"
                     ),
                 },
                 {

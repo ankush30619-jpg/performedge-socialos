@@ -135,6 +135,14 @@ export interface AgentExecution {
   platforms_checked?: string[];
   documents_read?: string[];
   files_generated?: TracedFile[];
+  // Master Orchestrator metrics
+  qualityScore?: number | null;       // 1-10 composite quality score
+  qualityDimensions?: AgentQualityScore;
+  qualityDiagnosis?: string | null;
+  health?: "pending" | "healthy" | "degraded" | "critical";
+  retries?: number;
+  heals?: number;
+  avgDurationMs?: number;
 }
 
 // ── Agent Run ────────────────────────────────────
@@ -301,11 +309,28 @@ export interface SSEEvent {
     | "pipeline_complete"
     | "pipeline_failed"
     | "log"
-    | "error";
+    | "error"
+    // ── Master Orchestrator events ──────────────
+    | "orchestrator_quality_score"   // quality score emitted after agent completes
+    | "orchestrator_retry"           // self-healing retry triggered
+    | "orchestrator_diagnosis"       // root-cause diagnosis of failure/low quality
+    | "orchestrator_healed"          // auto-fix succeeded
+    | "orchestrator_system_health";  // overall system health summary
   agentKey?: string;
   message?: string;
   timestamp?: string;
   data?: Record<string, unknown>;
+}
+
+// ── Quality Score (from Master Orchestrator) ──────
+export interface AgentQualityScore {
+  specificity?: number;
+  evidence?: number;
+  brand_align?: number;
+  completeness?: number;
+  anti_generic?: number;
+  composite?: number;
+  diagnosis?: string;
 }
 
 // ── App Store State ────────────────────────────────

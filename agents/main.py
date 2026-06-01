@@ -27,8 +27,18 @@ from pipeline import build_pipeline
 from trace import TracingEventQueue
 
 # ── In-memory run state store (replace with Redis in production) ──────────────
-# run_id -> { state, event_queue, task }
+# run_id -> { state, event_queue, task, manager }
 _active_runs: dict = {}
+
+# Last manager snapshot (for /api/agents/health when no run is active)
+_last_manager_snapshot: dict = {
+    "system_health":       "unknown",
+    "agent_performance":   {},
+    "bottleneck_report":   [],
+    "subagent_registry":   {},
+    "last_run_id":         None,
+    "last_run_at":         None,
+}
 
 
 @asynccontextmanager
@@ -67,6 +77,43 @@ class RelearnRequest(BaseModel):
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "socialos-agents", "ts": datetime.utcnow().isoformat()}
+
+
+# ── Manager health (rich, for the dashboard) ──────────────────────────────────
+@app.get("/api/agents/health")
+async def manager_health():
+    """Snapshot of the SocialMediaManagerAgent state.
+
+    Returns whichever is more current:
+      • The live registry of the in-flight run (if one is active), or
+      • The last snapshot recorded when the most recent run completed.
+    """
+    # Find an active run with a live manager
+    for run_id, run in _active_runs.items():
+        mgr = run.get("manager")
+        if run.get("status") == "running" and mgr is not None:
+            return {
+                "manager_status":   "active",
+                "active_run_id":    run_id,
+                "system_health":    mgr.registry.get_system_health(),
+                "agent_performance": mgr.registry.get_all(),
+                "bottleneck_report": mgr.bottleneck_report(),
+                "subagent_registry": _subagent_registry(),
+                "ts":               datetime.utcnow().isoformat(),
+            }
+    return {
+        "manager_status":    "idle",
+        **_last_manager_snapshot,
+        "ts":                datetime.utcnow().isoformat(),
+    }
+
+
+def _subagent_registry() -> dict:
+    try:
+        from orchestrator import SUBAGENT_REGISTRY
+        return SUBAGENT_REGISTRY
+    except Exception:
+        return {}
 
 
 # ── POST /runs — start a pipeline run ─────────────────────────────────────────
@@ -139,8 +186,45 @@ async def start_run(req: RunRequest):
                         state.setdefault("errors", []).append(f"{key}: {node_err}")
                 final_state = state
             else:
-                pipeline = build_pipeline(event_queue)
-                final_state = await pipeline.ainvoke(initial_state)
+                pipeline, manager = build_pipeline(event_queue, return_manager=True)
+                _active_runs[run_id]["manager"] = manager
+                # Start health-snapshot loop so the frontend gets a live pulse
+                manager.start_health_snapshot_loop()
+                # Inject the brand's prior lessons into state so brain agents
+                # can read them (LEARNED_PATTERNS injected by their prompts)
+                try:
+                    brand_name = (initial_state.get("brand") or {}).get("name", "")
+                    if brand_name:
+                        initial_state["learned_patterns"] = manager.load_lessons(brand_name)
+                except Exception as _lp_ex:
+                    print(f"[Pipeline] load_lessons failed (non-fatal): {_lp_ex}")
+                try:
+                    final_state = await pipeline.ainvoke(initial_state)
+                finally:
+                    await manager.stop_health_snapshot_loop()
+                    # Persist final snapshot for the idle /api/agents/health endpoint
+                    try:
+                        _last_manager_snapshot.update({
+                            "system_health":     manager.registry.get_system_health(),
+                            "agent_performance": manager.registry.get_all(),
+                            "bottleneck_report": manager.bottleneck_report(),
+                            "subagent_registry": _subagent_registry(),
+                            "last_run_id":       run_id,
+                            "last_run_at":       datetime.utcnow().isoformat(),
+                        })
+                    except Exception:
+                        pass
+                # Synthesize lessons from the just-completed run for future runs
+                try:
+                    brand_name = (initial_state.get("brand") or {}).get("name", "")
+                    if brand_name:
+                        from agents.learning.reflection import synthesize_lessons
+                        await synthesize_lessons(
+                            brand_name=brand_name,
+                            niche=(initial_state.get("brand") or {}).get("niche", ""),
+                        )
+                except Exception as _ref_ex:
+                    print(f"[Pipeline] reflection failed (non-fatal): {_ref_ex}")
 
             # ── Merge execution traces into agent_statuses ───────────────────
             # Every event that flowed through the run is aggregated per-agent
@@ -159,6 +243,44 @@ async def start_run(req: RunRequest):
             except Exception as trace_err:
                 print(f"[Pipeline] Trace aggregation error (non-fatal): {trace_err}")
 
+            # ── Emit Master Orchestrator system health summary ───────────────
+            # The pipeline object now has orchestrator metrics; retrieve them
+            # from the event_queue's captured orchestrator events if available.
+            try:
+                from orchestrator import create_orchestrated_pipeline as _orch_factory
+                # The master orchestrator was created inside build_pipeline(); its
+                # performance data is embedded in each agent's agentStatuses entry.
+                # Compute system health from the merged statuses.
+                all_health = [
+                    v.get("health", "pending")
+                    for v in (final_state.get("agent_statuses") or {}).values()
+                    if isinstance(v, dict)
+                ]
+                system_health = (
+                    "critical" if "critical" in all_health else
+                    "degraded" if "degraded" in all_health else
+                    "healthy"
+                )
+                avg_quality = None
+                quality_scores = [
+                    v.get("qualityScore") for v in (final_state.get("agent_statuses") or {}).values()
+                    if isinstance(v, dict) and v.get("qualityScore") is not None
+                ]
+                if quality_scores:
+                    avg_quality = round(sum(quality_scores) / len(quality_scores), 1)
+
+                await event_queue.put({
+                    "type":    "orchestrator_system_health",
+                    "message": (
+                        f"System health: {system_health.upper()} — "
+                        + (f"avg quality {avg_quality}/10 across {len(quality_scores)} scored agents" if avg_quality else "no quality data")
+                    ),
+                    "data": {"system_health": system_health, "avg_quality": avg_quality},
+                    "timestamp": datetime.utcnow().isoformat(),
+                })
+            except Exception as _orch_err:
+                print(f"[Pipeline] Orchestrator health summary error (non-fatal): {_orch_err}")
+
             # Signal completion
             await event_queue.put({
                 "type": "pipeline_complete",
@@ -173,6 +295,7 @@ async def start_run(req: RunRequest):
                     "designAssets": final_state.get("design_assets") or [],
                     "analystReport": final_state.get("analyst_report"),
                     "strategyJson": final_state.get("growth_strategy"),
+                    "systemHealth": system_health if 'system_health' in dir() else "unknown",
                 },
             })
 

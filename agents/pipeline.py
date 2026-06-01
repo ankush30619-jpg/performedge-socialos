@@ -1,6 +1,13 @@
 """
 SocialOS LangGraph Pipeline
 Builds the 6-agent DAG with parallel sub-agent fan-out.
+
+The MasterOrchestratorAgent (orchestrator.py) wraps every node to provide:
+  - Real-time performance monitoring and health tracking
+  - GPT-powered 5-dimension quality scoring for content agents
+  - 3-tier self-healing: retry → enhanced-retry → fallback
+  - Automatic diagnosis of failures with root-cause analysis
+  - Quality score stored in agentStatuses for the UI to display
 """
 import asyncio
 from datetime import datetime
@@ -9,10 +16,16 @@ from typing import Any
 from langgraph.graph import StateGraph, END
 
 from state import SocialOSState
+from orchestrator import create_orchestrated_pipeline
 
 
-def build_pipeline(event_queue: asyncio.Queue):
-    """Build and compile the LangGraph pipeline."""
+def build_pipeline(event_queue: asyncio.Queue, return_manager: bool = False):
+    """Build and compile the LangGraph pipeline with Social Media Manager oversight.
+
+    If `return_manager=True`, returns `(compiled, manager)` so the caller can
+    start/stop the manager's health-snapshot loop and access the registry.
+    Defaults to returning only the compiled pipeline for backward compatibility.
+    """
 
     # Import nodes (lazy to avoid circular imports)
     from nodes.brand_manager import brand_manager_node
@@ -24,53 +37,14 @@ def build_pipeline(event_queue: asyncio.Queue):
     from nodes.copywriter import copywriter_node
     from nodes.designer import designer_node
 
-    # Wrap each node to emit SSE events
+    # ── Instantiate Master Orchestrator Agent ─────────────────────────────────
+    master = create_orchestrated_pipeline(event_queue)
+
+    # make_wrap_node returns a LangGraph-compatible async function with full
+    # monitoring, quality scoring, and self-healing. It replaces the plain
+    # wrap_node that previously existed here.
     def wrap_node(node_fn, agent_key: str):
-        async def wrapped(state: SocialOSState) -> dict:
-            # Emit started event
-            await event_queue.put({
-                "type": "agent_started",
-                "agentKey": agent_key,
-                "message": f"{agent_key} started",
-                "timestamp": datetime.utcnow().isoformat(),
-            })
-
-            try:
-                result = await node_fn(state, event_queue)
-
-                msg = result.pop("_message", "Completed")
-
-                await event_queue.put({
-                    "type": "agent_completed",
-                    "agentKey": agent_key,
-                    "message": msg,
-                    "timestamp": datetime.utcnow().isoformat(),
-                })
-
-                # LangGraph ONLY wants the delta (changed keys), not the full state.
-                # agent_statuses uses _merge_dict reducer so we return just this agent's entry.
-                return {
-                    **result,
-                    "agent_statuses": {agent_key: {"status": "completed", "message": msg}},
-                }
-
-            except Exception as e:
-                msg = str(e)
-
-                await event_queue.put({
-                    "type": "agent_failed",
-                    "agentKey": agent_key,
-                    "message": msg,
-                    "timestamp": datetime.utcnow().isoformat(),
-                })
-
-                # Non-fatal — return only the status delta + error
-                return {
-                    "agent_statuses": {agent_key: {"status": "failed", "message": msg}},
-                    "errors": [{"agent": agent_key, "error": msg}],
-                }
-
-        return wrapped
+        return master.make_wrap_node(node_fn, agent_key)
 
     # Sub-agent fan-out (Research + Competitor run in parallel inside Growth Planner)
     # LangGraph doesn't natively support parallel nodes in simple graph — we handle
@@ -139,4 +113,7 @@ def build_pipeline(event_queue: asyncio.Queue):
     graph.add_edge("copywriter", "designer")
     graph.add_edge("designer", END)
 
-    return graph.compile()
+    compiled = graph.compile()
+    if return_manager:
+        return compiled, master
+    return compiled

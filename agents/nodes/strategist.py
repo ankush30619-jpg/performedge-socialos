@@ -9,27 +9,17 @@ Generates a deeply brand-specific content calendar by:
 """
 import asyncio
 import json
-import os
 from datetime import datetime, timedelta
-from openai import AsyncOpenAI
+from llm_client import complete as llm_complete
 from state import SocialOSState
-from skills.registry import BUYER_STAGES
+from skills.registry import (
+    BUYER_STAGES,
+    CRITICAL_INSTRUCTION_PREFIX, LEARNED_PATTERNS_SLOT,
+    HASHTAG_STRATEGY_2026, GROWTH_KPI_THRESHOLDS_2026,
+    AUDIENCE_PAIN_MINING_2026,
+)
 
 CONTENT_TYPES = ["Reel", "Carousel", "Graphic", "Story", "AI Reel"]
-
-# Lazy singleton
-_oai = None
-
-
-def _get_oai():
-    global _oai
-    if _oai is not None:
-        return _oai
-    key = os.getenv("OPENAI_API_KEY", "")
-    if key:
-        _oai = AsyncOpenAI(api_key=key)
-        print("[Strategist] OpenAI client initialized")
-    return _oai
 
 
 async def strategist_node(state: SocialOSState, event_queue: asyncio.Queue) -> dict:
@@ -52,7 +42,8 @@ async def strategist_node(state: SocialOSState, event_queue: asyncio.Queue) -> d
 
     calendar = await _generate_calendar(
         brand, brand_knowledge, growth_strategy,
-        research_data, competitor_data, analyst_report, days_ahead
+        research_data, competitor_data, analyst_report, days_ahead,
+        learned_patterns=state.get("learned_patterns") or "",
     )
 
     await event_queue.put({
@@ -69,10 +60,9 @@ async def strategist_node(state: SocialOSState, event_queue: asyncio.Queue) -> d
 
 async def _generate_calendar(
     brand, brand_knowledge, growth_strategy,
-    research_data, competitor_data, analyst_report, days_ahead
+    research_data, competitor_data, analyst_report, days_ahead,
+    learned_patterns: str = "",
 ) -> list:
-
-    oai = _get_oai()
 
     # ── Extract every relevant brand field ────────────────────────────────────
     name            = brand.get("name", "Brand")
@@ -166,8 +156,17 @@ async def _generate_calendar(
         if worst_content: p_parts.append(f"Content to AVOID: {worst_content}")
         performance_section = "Performance Intelligence:\n" + "\n".join(p_parts)
 
-    # ── System prompt: full brand brief ───────────────────────────────────
+    # ── System prompt: full brand brief + 2026 prefix + learned patterns ─
+    learned_block = (
+        LEARNED_PATTERNS_SLOT.format(learned_patterns_body=learned_patterns)
+        if learned_patterns else ""
+    )
     system_prompt = (
+        CRITICAL_INSTRUCTION_PREFIX + "\n\n"
+        + (learned_block + "\n\n" if learned_block else "")
+        + HASHTAG_STRATEGY_2026 + "\n\n"
+        + GROWTH_KPI_THRESHOLDS_2026 + "\n\n"
+    ) + (
         f"You are the head content strategist for {name}, a {niche} brand in the {industry} space.\n\n"
         f"{context_block[:800] if context_block else ''}\n\n"
         f"Your role: Create a {days_ahead}-day Instagram content calendar that feels 100% authentic to {name}. "
@@ -217,18 +216,18 @@ async def _generate_calendar(
     user_prompt = "\n".join(user_prompt_parts)
 
     try:
-        resp = await oai.chat.completions.create(
-            model="gpt-4o-mini",
+        raw_text = await llm_complete(
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user",   "content": user_prompt},
             ],
-            response_format={"type": "json_object"},
+            tier="brain",
             temperature=0.7,
             max_tokens=4000,
+            response_json=True,
         )
 
-        raw     = json.loads(resp.choices[0].message.content)
+        raw     = json.loads(raw_text)
         posts_raw = raw.get("posts") or raw.get("calendar") or []
 
         today    = datetime.utcnow().date()

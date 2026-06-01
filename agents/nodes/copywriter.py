@@ -15,13 +15,19 @@ Processes posts in batches of 5 for efficiency.
 """
 import asyncio
 import json
-import os
-from openai import AsyncOpenAI
+from llm_client import complete as llm_complete
 from state import SocialOSState
 from skills.registry import (
     PSYCHOLOGY_TRIGGERS, AIDA_STRUCTURE, HOOK_FORMULAS, SEVEN_SWEEPS,
     ANTI_AI_LANGUAGE, AD_SCRIPT_FRAMEWORK, CONVERSION_FRAMEWORKS,
     HOOK_ROTATION_ENGINE, HINGLISH_VOICE,
+    REEL_SCRIPT_FRAMEWORK, SCRIPT_QUALITY_CHECKLIST,
+    VIRAL_CONTENT_ARCHITECTURE, PERFORMANCE_SCORING_FRAMEWORK,
+    # 2026 upgrades — see research_2026.md
+    CRITICAL_INSTRUCTION_PREFIX, LEARNED_PATTERNS_SLOT,
+    HOOK_FORMULAS_2026, REEL_HOOK_TIMING_RULES_2026,
+    CAROUSEL_FRAMEWORKS_2026, ANTI_AI_LANGUAGE_2026_ADDITIONS,
+    EIGHT_SWEEPS,
 )
 
 BATCH_SIZE = 5
@@ -44,27 +50,13 @@ def _is_hinglish(language: str) -> bool:
     l = (language or "").lower()
     return "hinglish" in l or "hindi" in l or "roman urdu" in l
 
-# Lazy singleton
-_oai = None
-
-
-def _get_oai():
-    global _oai
-    if _oai is not None:
-        return _oai
-    key = os.getenv("OPENAI_API_KEY", "")
-    if key:
-        _oai = AsyncOpenAI(api_key=key)
-        print("[Copywriter] OpenAI client initialized")
-    return _oai
-
-
 async def copywriter_node(state: SocialOSState, event_queue: asyncio.Queue) -> dict:
     calendar        = state.get("content_calendar") or []
     brand           = state.get("brand") or {}
     brand_knowledge = state.get("brand_knowledge") or {}
     growth_strategy = state.get("growth_strategy") or {}
     research_data   = state.get("research_data") or {}
+    learned         = state.get("learned_patterns") or ""
     total = len(calendar)
 
     await event_queue.put({
@@ -73,8 +65,7 @@ async def copywriter_node(state: SocialOSState, event_queue: asyncio.Queue) -> d
         "message":  f"Writing {total} brand-voice captions for {brand.get('name', 'brand')}…",
     })
 
-    oai = _get_oai()
-    if not oai or not calendar:
+    if not calendar:
         posts_with_copy = _fallback_copy(calendar, brand)
         return {
             "posts_with_copy":  posts_with_copy,
@@ -166,16 +157,32 @@ async def copywriter_node(state: SocialOSState, event_queue: asyncio.Queue) -> d
     voice_rules.append("- Mix: broad reach tags + niche community tags + brand-specific tags")
     voice_rules.append("- NO hashtag spam — all hashtags must be genuinely relevant to the post")
 
+    # ── 2026 brain-tier prompt: hard prefix + learned lessons + frameworks ──
+    learned_block = (
+        LEARNED_PATTERNS_SLOT.format(learned_patterns_body=learned)
+        if learned else ""
+    )
     system_prompt = (
-        "\n".join(voice_rules)
+        CRITICAL_INSTRUCTION_PREFIX
+        + ("\n\n" + learned_block if learned_block else "")
+        + "\n\n" + "\n".join(voice_rules)
         + "\n\n" + PSYCHOLOGY_TRIGGERS
         + "\n\n" + AIDA_STRUCTURE
         + "\n\n" + CONVERSION_FRAMEWORKS
+        # Hooks: 2026 frameworks FIRST, classic ones as fallback
+        + "\n\n" + HOOK_FORMULAS_2026
         + "\n\n" + HOOK_FORMULAS
         + "\n\n" + HOOK_ROTATION_ENGINE
+        + "\n\n" + REEL_HOOK_TIMING_RULES_2026  # 1.0s/3.0s contract
+        + "\n\n" + REEL_SCRIPT_FRAMEWORK
+        + "\n\n" + CAROUSEL_FRAMEWORKS_2026     # 8-slide canonical structure
         + "\n\n" + AD_SCRIPT_FRAMEWORK
-        + "\n\n" + SEVEN_SWEEPS
+        + "\n\n" + VIRAL_CONTENT_ARCHITECTURE
+        + "\n\n" + SCRIPT_QUALITY_CHECKLIST
+        + "\n\n" + EIGHT_SWEEPS                 # was SEVEN_SWEEPS — adds brand-specific sweep
         + "\n\n" + ANTI_AI_LANGUAGE
+        + "\n\n" + ANTI_AI_LANGUAGE_2026_ADDITIONS
+        + "\n\n" + PERFORMANCE_SCORING_FRAMEWORK
         + ("\n\n" + HINGLISH_VOICE if hinglish else "")
     )
 
@@ -253,7 +260,6 @@ async def _write_batch(
     hinglish: bool = False, hook_memory: list = None,
 ) -> list:
     """Write one batch of posts. Returns merged list with captions + hashtags."""
-    oai = _get_oai()
     hook_memory = hook_memory or []
 
     posts_desc = "\n".join(
@@ -347,18 +353,18 @@ async def _write_batch(
         f"brand, rewrite it so only {name} in {niche} could have written it. No preamble, no clichés."
     )
 
-    resp = await oai.chat.completions.create(
-        model="gpt-4o-mini",
+    raw_text = await llm_complete(
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user",   "content": user_prompt},
         ],
-        response_format={"type": "json_object"},
+        tier="brain",
         temperature=0.75,
-        max_tokens=10000,
+        max_tokens=8000,
+        response_json=True,
     )
 
-    raw         = json.loads(resp.choices[0].message.content)
+    raw         = json.loads(raw_text)
     results_raw = raw.get("posts") or []
 
     merged = []

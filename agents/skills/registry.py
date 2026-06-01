@@ -2,6 +2,49 @@
 Marketing Skills Registry — Framework constants for agent prompts.
 Distilled from marketing psychology, copywriting, social, content-strategy,
 customer-research, and competitor-profiling methodologies.
+
+LAST_RESEARCHED: 2026-06-02 — see research_2026.md for the audit trail
+behind every "_2026" suffixed constant in this file.
+"""
+
+# ── Critical instruction prefix — injected at the top of every brain-agent ────
+# prompt. Single source of truth for the platform's anti-generic stance.
+
+CRITICAL_INSTRUCTION_PREFIX = """
+CRITICAL — read before generating anything:
+
+1. If your output could apply to ANY brand, reject it and rewrite. Every
+   piece must contain at least one detail that ONLY this brand, in THIS
+   niche, to THIS audience, could say. Use the brand name, the niche
+   keyword, or an audience-specific descriptor in every caption / pillar /
+   tactic line.
+
+2. Banned phrases (any presence triggers automatic rejection by the
+   quality gate): unlock, unleash, elevate, dive into, delve, leverage,
+   harness, supercharge, game-changer, revolutionize, seamless, robust,
+   embark, navigate the landscape, in today's fast-paced world, look no
+   further, in conclusion, when it comes to, the world of, that being
+   said, it's important to note, tapestry, testament, realm, foster,
+   cutting-edge, ever-evolving, paradigm, take it to the next level,
+   the secret sauce, at the end of the day, needle-moving, let's dive in,
+   buckle up, multifaceted, comprehensive, holistic, bespoke, journey,
+   moreover, furthermore, crucial, transformative, groundbreaking,
+   synergy, empower, beacon, innovative, seamlessly.
+
+3. Replace every vague claim ("amazing", "great", "best") with a specific
+   number, name, or comparison. No tricolons. No hedge stacks. No
+   restating the prompt back as the opening line.
+"""
+
+# ── Learned-patterns slot — filled by the manager from brands/<brand>/_lessons.md
+# Brain-agent prompts include this constant as a placeholder; the manager
+# substitutes in the real lessons content per-run.
+
+LEARNED_PATTERNS_SLOT = """
+LEARNED_PATTERNS — patterns the manager extracted from this brand's prior
+runs. Treat as hard constraints; they were learned from concrete failures
+or successes on previous executions.
+{learned_patterns_body}
 """
 
 # ── Marketing Psychology Triggers ────────────────────────────────────────────
@@ -363,3 +406,313 @@ alternative_approaches · backup_plans. A plan with no stated risk is not a
 strategy — it's a wish. Consultant-grade output names what could go wrong and
 what to do about it.
 """
+
+# ── Reel Script Framework (50-second emotional arc) ──────────────────────────
+
+REEL_SCRIPT_FRAMEWORK = """
+REEL SCRIPT — 50-SECOND EMOTIONAL ARC (mandatory structure for every Reel script):
+
+[0-5s]   HOOK / PATTERN INTERRUPT:
+  Show the PAYOFF or CONFLICT first — never a greeting, never a logo.
+  The first visual + first words ARE the hook. Make it impossible to scroll past.
+  Ask: "Would I stop scrolling for this?"
+
+[5-15s]  CURIOSITY LOOP:
+  Open a question the viewer must stay to have answered.
+  "Here's the part nobody talks about…" / "And what I found shocked me…"
+  Do NOT answer it yet. Let the tension build.
+
+[15-25s] EMOTIONAL CONNECTION:
+  Name the exact feeling — frustration, fear of missing out, the relief they want.
+  Use 5th-grade vocabulary. Simple sentences. Short bursts.
+  If a 12-year-old would not understand it, rewrite it.
+  "You know that feeling when…" / "The worst part is…"
+
+[25-35s] REAL-WORLD EXAMPLE / DEMONSTRATION:
+  Show the concept working — not describe it, SHOW it.
+  Concrete. Specific. One real example beats three vague claims.
+  Include a number, a name, a result. "47 people tried this and…"
+
+[35-45s] RE-HOOK / PATTERN INTERRUPT #2:
+  Mid-video reset. A surprising fact, a POV shift, or an unexpected reveal
+  that re-engages viewers who are drifting. This is the secret to high
+  completion rates.
+
+[45-50s] MEMORABLE CLOSE + CTA:
+  One line that resonates emotionally AND gives a clear next action.
+  "That's why [result]. If you want [outcome], [action]."
+  CTA must be friction-free — one verb, obvious next step.
+
+VOICE TEST: Read every line aloud. If any line sounds like it was written
+(not spoken), rewrite it. Scripts are SPOKEN, not read.
+"""
+
+# ── Script Quality Checklist ──────────────────────────────────────────────────
+
+SCRIPT_QUALITY_CHECKLIST = """
+SCRIPT QUALITY GATE — run every script through this before finalizing:
+
+1. LENGTH: Can this be cut by 30% without losing the core value? If yes, cut it.
+   Target: under 150 words for 50-second Reel. Under 80 words for 30-second.
+
+2. VOCABULARY: 5th-grade language. Replace every technical/jargon word with the
+   simplest equivalent. "Engagement rate" → "likes and comments".
+   "Content strategy" → "what to post and when".
+
+3. EVERY SENTENCE EARNS ITS PLACE: Read each sentence and ask "what happens
+   if I delete this?" If the script still works, delete it.
+
+4. ROBOTIC TEST: Mark any sentence that sounds like it was typed, not spoken.
+   - AI tell: "In today's fast-paced world…" → DELETE
+   - AI tell: "This is why it's important to…" → DELETE
+   - AI tell: starting with "So," or "Well," or "Now, let's" → DELETE
+
+5. BRAND SPECIFICITY: Replace at least 1 generic reference with the brand's
+   exact niche, audience, product name, or unique differentiator. If you can
+   swap this brand's name for any other brand and the script still works,
+   it's not specific enough — rewrite.
+
+6. HOOK TEST (apply BEFORE writing the rest): Show only the first 2 lines to
+   someone. Would they want to know what comes next? If "maybe" — rewrite.
+   Must be a "yes" or it fails.
+"""
+
+# ── Viral Content Architecture (research-first framework) ────────────────────
+
+VIRAL_CONTENT_ARCHITECTURE = """
+VIRAL CONTENT ARCHITECTURE — 5-step research-first process:
+
+STEP 1 — RESEARCH THE TOPIC (use data, not guesses):
+  - What's currently trending in this niche? (check Tavily/research agent output)
+  - What are the audience's KEY pain points right now? (use competitor_tracker gaps)
+  - What format is getting shares/saves this week? (use research_data)
+  - What are competitors NOT covering that the audience wants?
+
+STEP 2 — DEFINE PRIMARY MESSAGE (one message per piece):
+  Pick ONE: Educate / Entertain / Inspire / Convert / Build authority.
+  NEVER try to do two at once. Single-message content outperforms multi-message
+  content by 2-3x on completion rate.
+
+STEP 3 — DRAFT THE SCRIPT:
+  A: Hook that references the specific audience pain/desire
+  B: Content that delivers on the hook's promise — no padding
+  C: Conclusion that reinforces the hook + ONE clear action
+
+STEP 4 — PLATFORM OPTIMIZATION:
+  - Instagram Reels: fast cuts, on-screen text for muted viewing, vertical 9:16
+  - Carousel: each slide must be a complete thought, Slide 1 IS the hook
+  - Story: interactive (poll/question), 15s max per frame, no dense text
+  - Caption: first line mirrors the hook, do NOT repeat the script
+
+STEP 5 — VISUAL SUGGESTIONS PER SECTION:
+  For every script section, specify: what the camera shows, what on-screen text
+  appears, and what the pacing/cut style is. Sound-off test: does the visual
+  alone communicate the message? If not, add stronger on-screen text.
+"""
+
+# ── Performance Scoring Framework (5-dimension quality rubric) ───────────────
+
+PERFORMANCE_SCORING_FRAMEWORK = """
+OUTPUT QUALITY SELF-CHECK — score your own output before submitting.
+Apply this to EVERY piece of content, strategy, or recommendation:
+
+DIMENSION 1 — SPECIFICITY (1-10):
+  Is this specific to THIS brand, niche, audience, and competitive landscape?
+  Score 1-4: Could apply to any business in any industry.
+  Score 5-7: References the niche but not the specific brand.
+  Score 8-10: Names the brand, references their specific audience, competitors,
+              or content performance — cannot be copy-pasted to another account.
+
+DIMENSION 2 — EVIDENCE (1-10):
+  Does every recommendation cite actual data, research, or competitor findings?
+  Score 1-4: Pure assertion. No data cited.
+  Score 5-7: References research vaguely ("studies show", "experts say").
+  Score 8-10: Cites specific metrics, competitor names, platform data, or
+              research findings from the research/competitor agent output.
+
+DIMENSION 3 — BRAND ALIGNMENT (1-10):
+  Does the output match the brand's voice, tone, positioning, and audience?
+  Score 1-4: Generic corporate tone that contradicts the brand brief.
+  Score 8-10: A reader who knows the brand would say "yes, this sounds like them."
+
+DIMENSION 4 — COMPLETENESS (1-10):
+  Are all required fields populated with substantive (not placeholder) content?
+  Score 1-4: Multiple empty fields or placeholder text ("TBD", "see above").
+  Score 8-10: Every field has real, actionable, non-repetitive content.
+
+DIMENSION 5 — ANTI-GENERIC TEST (1-10):
+  Would this output still make sense if the brand name was swapped for a
+  completely different brand in a different niche?
+  Score 1-4: Yes — dangerously generic.
+  Score 8-10: No — this is irreplaceable, brand-specific content.
+
+COMPOSITE THRESHOLD: If any single dimension scores < 5, regenerate before
+submitting. Target composite ≥ 7.0 for all content-producing agents.
+"""
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 2026 RESEARCH-DRIVEN UPGRADES — see research_2026.md for the audit trail
+# ══════════════════════════════════════════════════════════════════════════════
+
+HOOK_FORMULAS_2026 = """
+HOOK FORMULAS — 2026 upgrade (use these in addition to the 10 classic
+formulas above). Brain agents should reach for these first; the classic
+list is the fallback.
+
+1. Specific-Outcome (highest converter across IG/TikTok/Shorts in 2026):
+   "I went from [bad number] to [good number] in [timeframe] using [thing]."
+
+2. POV-Native Reels (strongest Reels-native opener):
+   "POV: you just found the [niche] hack that saves you [specific time/money]."
+
+3. Unpopular-Opinion:
+   "Unpopular opinion: [contrarian statement most of niche disagrees with]."
+
+4. Compound Hook (stack 2+ triggers — curiosity + social proof, status +
+   loss aversion, controversy + authority):
+   "[Curiosity opener] + [number-based social proof] + [time-bound stake]."
+
+5. Pattern Interrupt:
+   First visual frame violates the niche's normal aesthetic. Unexpected
+   movement, contrasting color, or contextual mismatch in the first 0.5s.
+
+Hook hit rates that matter: ≥ 30 % three-second hold = good, ≥ 45 % = top
+percentile. If a hook can't credibly hit ≥ 30 % on its niche, replace it.
+"""
+
+REEL_HOOK_TIMING_RULES_2026 = """
+REEL HOOK TIMING — 2026 algorithm contract for Instagram Reels:
+
+  0.0s    — First visual frame IS the hook. Write the on-screen text BEFORE
+            scripting voiceover.
+  ≤ 1.0s  — Verbal/conceptual hook lands. No greetings, no "hey guys".
+  ≤ 3.0s  — Payoff promise visible (what they're going to learn / get /
+            see). Reels' algorithm penalizes slow-burn intros harder than
+            TikTok's.
+  ≤ 5.0s  — Pattern interrupt (unexpected cut, stat reveal, POV shift) to
+            re-secure attention from autopilot scrollers.
+  Last 2s — Retention loop. Recontextualize the opening so viewers
+            re-watch. End-card must give a reason to swipe or comment.
+"""
+
+CAROUSEL_FRAMEWORKS_2026 = """
+CAROUSEL FRAMEWORKS — 2026 (Welsh / Acosta / Bloom playbook):
+
+Format spec:
+  • Aspect ratio: 1080×1350 (4:5 portrait) — 71% of LinkedIn traffic is
+    mobile and 4:5 maximizes screen area.
+  • Optimal length: 8 slides (outperforms 5 on dwell-time signals).
+  • Posting mix for serious creators: 60% text posts, 40% carousels —
+    text posts maintain daily presence, carousels do the algorithmic
+    heavy lifting.
+
+8-slide canonical structure:
+  1. Pattern-interrupt hook  + "swipe to see…" pull (one big phrase).
+  2. Pain framing — name the specific pain, not the abstract category.
+  3. Why it matters — stakes / loss frame.
+  4. The reveal — the framework, list, or step number teaser.
+  5. Step / item 1 — concrete, named, with a number.
+  6. Step / item 2 — same depth.
+  7. Step / item 3 (or punchline / contrarian close).
+  8. ONE CTA — save, comment a keyword, follow. Never two competing asks.
+
+Choose ONE of these four sub-frameworks per carousel:
+  • OPEN-LOOP   : promise → tension → resolution withheld until slide 7
+  • STEP-BY-STEP: numbered tactical breakdown of a result
+  • CONTRARIAN  : challenge a niche orthodoxy with evidence
+  • CASE-STUDY  : "I tried [thing] for [time]. Here's what happened."
+"""
+
+HASHTAG_STRATEGY_2026 = """
+HASHTAG STRATEGY — 2026 (the 10–15-per-post, 5-rotated-sets approach):
+
+Per post: use 10–15 hashtags, never 30. Rotate across 5 sets to give the
+algorithm fresh signals.
+
+Each set composed as:
+  • 5 broad tags     — 500K–2M posts each. Baseline reach, low conversion.
+                       Examples: #marketing, #instagramgrowth.
+                       Cap at 2–3 per post — over-use dilutes signal.
+  • 10 mid-tier tags — 100K–500K posts. The sweet spot. Use 5–7 per post.
+                       Specific enough to find interested audiences.
+  • 10 niche tags    — 10K–100K posts. High relevance, low competition.
+                       Use 3–5 per post — strongest follower-conversion.
+  • 5 branded tags   — campaign or community hashtags this brand owns.
+
+KPI: A/B-testing hashtags lifts reach 40% in 3 months (HubSpot 2026 study).
+Cycle a new set into rotation every 2 weeks.
+"""
+
+GROWTH_KPI_THRESHOLDS_2026 = """
+GROWTH KPI THRESHOLDS — 2026 (concrete numbers, not vibes):
+
+Reach-decline triggers (any one of these = act):
+  • Engagement rate (likes+comments+saves ÷ reach) declines MoM for 2+ months.
+  • Story completion rate drops below 40%.
+  • DM rate falls below 2 DMs per 1,000 impressions.
+
+Audience-growth signals:
+  • Micro-niche accounts gain followers ~5× faster than generalists in
+    year 1 — focus beats breadth.
+  • Follower:engagement ratio of < 3% on accounts under 10k = thin
+    audience; pause acquisition, fix content.
+
+When growthPlanner outputs a tactic, every line MUST include:
+  • A concrete number (frequency, time slot, KPI threshold, count).
+  • A platform name (Instagram, LinkedIn, Reels, Stories — not "social").
+  • A measurable trigger that says when to escalate or pivot.
+"""
+
+AUDIENCE_PAIN_MINING_2026 = """
+AUDIENCE PAIN-POINT MINING — 2026 methodology for the Research agent:
+
+Reddit and Quora are the only places users say what they actually think
+without brand filter. Use them in parallel — Reddit is raw and fast,
+Quora is contextual and problem-framed.
+
+Methodology:
+  1. Identify 3–5 subreddits + 3–5 Quora topic pages in the brand's niche.
+  2. Pull threads with these filters:
+     • Reddit: sort = `top`, period = `month`.
+     • Quora: sort by answer upvote count.
+  3. Target volume: 50–100 threads per niche. Quality > quantity — skip
+     low-upvote noise.
+  4. Synthesis: extract pain themes + 2–3 verbatim quotes per theme.
+     Verbatim quotes are gold for hook generation — they reveal the exact
+     phrasing the audience uses for their own problem.
+  5. The questions themselves become content-pillar candidates. High-
+     upvote answers tell you the depth required to compete.
+
+NEVER summarize pain into a generic adjective ("frustrated", "confused").
+Always cite the specific situation that caused the pain ("got the wrong
+ring size after the 14-day return window closed").
+"""
+
+ANTI_AI_LANGUAGE_2026_ADDITIONS = """
+ANTI-AI LANGUAGE — 2026 additions (these are the words/phrases now flagged
+in addition to the original ANTI_AI_LANGUAGE list above):
+
+Additional banned words: multifaceted, comprehensive, holistic, bespoke,
+journey, moreover, furthermore, crucial, transformative, groundbreaking,
+synergy, empower, beacon, innovative, seamlessly, utilize.
+
+Additional banned phrases:
+  • "In today's digital age..."
+  • "In today's fast-paced world..." (already in v1 — restated for emphasis)
+  • "It's worth noting..."
+  • "Designed to enhance..."
+  • "Embark on a journey..."
+
+Detectors (Turnitin, GPTZero, Originality AI) are now more sensitive to
+these clusters than they were in 2024. By 2026, a reader's "AI fingerprint
+sensitivity" detects the pattern within ~2 sentences.
+"""
+
+# ── Backward-compat: keep the 7-sweeps name but advise upgrading to 8 ─────────
+EIGHT_SWEEPS = SEVEN_SWEEPS + """
+8. Brand-specific detail : Does the output contain at least ONE detail
+   that ONLY this brand, in this niche, to this audience could write?
+   If not, identify the line that fails and rewrite it with a brand-
+   specific number, name, place, or product.
+"""
+

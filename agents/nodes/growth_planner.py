@@ -14,27 +14,18 @@ import json
 import os
 from datetime import datetime
 
-from openai import AsyncOpenAI
+from llm_client import complete as llm_complete
 from state import SocialOSState
 from nodes.research_agent import research_agent_node
 from nodes.competitor_tracker import competitor_tracker_node
 from skills.registry import (
     GROWTH_ROADMAP_FRAMEWORK, STRATEGIC_THINKING,
     BUYER_STAGES, ANTI_AI_LANGUAGE,
+    # 2026 upgrades
+    CRITICAL_INSTRUCTION_PREFIX, LEARNED_PATTERNS_SLOT,
+    HASHTAG_STRATEGY_2026, GROWTH_KPI_THRESHOLDS_2026,
+    ANTI_AI_LANGUAGE_2026_ADDITIONS,
 )
-
-# Lazy OpenAI client — initialized on first use to ensure .env is loaded
-_oai = None
-
-
-def _get_oai():
-    global _oai
-    if _oai is not None:
-        return _oai
-    key = os.getenv("OPENAI_API_KEY", "")
-    if key:
-        _oai = AsyncOpenAI(api_key=key)
-    return _oai
 
 # Lazy Supabase singleton — initialized on first use
 _supabase = None
@@ -122,7 +113,8 @@ async def growth_planner_node(state: SocialOSState, event_queue: asyncio.Queue) 
 
     growth_strategy = await _generate_strategy(
         brand, brand_knowledge, analyst_report,
-        research_data, competitor_data, ig_audit, days_ahead, feasibility
+        research_data, competitor_data, ig_audit, days_ahead, feasibility,
+        learned_patterns=state.get("learned_patterns") or "",
     )
 
     # ── Quality-check phase (Change 2): validate numbers before they reach
@@ -387,11 +379,7 @@ def _calculate_goal_feasibility(ig_audit: dict, days_ahead: int) -> dict:
 
 # ── GPT Growth Strategy ──────────────────────────────────────────────────────
 
-async def _generate_strategy(brand, brand_knowledge, analyst_report, research_data, competitor_data, ig_audit, days_ahead, feasibility: dict = None) -> dict:
-    oai = _get_oai()
-    if not oai:
-        return _fallback_strategy(brand, days_ahead, ig_audit)
-
+async def _generate_strategy(brand, brand_knowledge, analyst_report, research_data, competitor_data, ig_audit, days_ahead, feasibility: dict = None, learned_patterns: str = "") -> dict:
     niche           = brand.get("niche", "")
     name            = brand.get("name", "brand")
     tone            = brand.get("tone", "Professional")
@@ -437,13 +425,22 @@ async def _generate_strategy(brand, brand_knowledge, analyst_report, research_da
     goal         = ig_audit.get("goal_followers", 0)
     gap          = ig_audit.get("follower_gap", 0)
 
+    learned_block = (
+        LEARNED_PATTERNS_SLOT.format(learned_patterns_body=learned_patterns)
+        if learned_patterns else ""
+    )
     try:
-        resp = await oai.chat.completions.create(
-            model="gpt-4o-mini",
+        raw_text = await llm_complete(
             messages=[
                 {
                     "role": "system",
                     "content": (
+                        CRITICAL_INSTRUCTION_PREFIX + "\n\n"
+                        + (learned_block + "\n\n" if learned_block else "")
+                        + HASHTAG_STRATEGY_2026 + "\n\n"
+                        + GROWTH_KPI_THRESHOLDS_2026 + "\n\n"
+                        + ANTI_AI_LANGUAGE_2026_ADDITIONS + "\n\n"
+                        +
                         f"You are a senior social media growth strategist. You produce consulting-grade, "
                         f"data-backed growth plans — not templates. Every recommendation MUST reference "
                         f"{name} and {niche} specifically. Generic advice is unacceptable.\n\n"
@@ -618,11 +615,12 @@ async def _generate_strategy(brand, brand_knowledge, analyst_report, research_da
                     ),
                 },
             ],
-            response_format={"type": "json_object"},
+            tier="brain",
             temperature=0.5,
             max_tokens=7000,
+            response_json=True,
         )
-        strategy_out = json.loads(resp.choices[0].message.content)
+        strategy_out = json.loads(raw_text)
         # Ensure KPI targets from analyst flow through to the PPT layer
         if not strategy_out.get("kpi_targets_90day") and analyst_report.get("kpi_targets_90day"):
             strategy_out["kpi_targets_90day"] = analyst_report["kpi_targets_90day"]
@@ -650,10 +648,6 @@ async def _generate_extended_plan(
     DATA QUALITY: all forecasts are labeled as Estimate/Assumption — never
     measured fact. Numbers are clamped by _clamp_extended_forecasting.
     """
-    oai = _get_oai()
-    if not oai:
-        return {}
-
     name      = brand.get("name", "brand")
     niche     = brand.get("niche", "")
     followers = ig_audit.get("followers", 0)
@@ -670,12 +664,14 @@ async def _generate_extended_plan(
     tactics    = (growth_strategy.get("growth_tactics") or [])[:4]
 
     try:
-        resp = await oai.chat.completions.create(
-            model="gpt-4o-mini",
+        raw_text = await llm_complete(
             messages=[
                 {
                     "role": "system",
                     "content": (
+                        CRITICAL_INSTRUCTION_PREFIX + "\n\n"
+                        + GROWTH_KPI_THRESHOLDS_2026 + "\n\n"
+                        +
                         f"You are a senior growth strategist producing an investor-grade, non-generic report "
                         f"for {name} ({niche}). Every recommendation must cite specific evidence from the "
                         f"data provided — if a recommendation could apply to any brand, rewrite it.\n\n"
@@ -732,11 +728,12 @@ async def _generate_extended_plan(
                     ),
                 },
             ],
-            response_format={"type": "json_object"},
+            tier="brain",
             temperature=0.4,
             max_tokens=5000,
+            response_json=True,
         )
-        return json.loads(resp.choices[0].message.content)
+        return json.loads(raw_text)
     except Exception as e:
         print(f"[GrowthPlanner] Extended plan GPT error: {e}")
         import traceback; traceback.print_exc()
