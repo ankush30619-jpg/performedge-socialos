@@ -544,6 +544,28 @@ export default function AgentsPage() {
             </div>
             <ProgressBar value={progressPct} />
 
+            {/* Live execution tracking — current agent · activity · step */}
+            {isRunning && (() => {
+              const runningKey = AGENT_ORDER.find((k) => agentStatuses[k]?.status === "running");
+              const stepIdx = Math.min(completedCount + 1, AGENT_ORDER.length);
+              const activity = runningKey
+                ? (agentStatuses[runningKey]?.message
+                   || [...sseEvents].reverse().find((e) => e.agentKey === runningKey)?.message)
+                : [...sseEvents].reverse().find((e) => e.message)?.message;
+              return (
+                <div className="mt-3 flex items-center gap-2 text-xs">
+                  <span className="w-2 h-2 rounded-full bg-brand-light animate-pulse flex-shrink-0" />
+                  <span className="text-white/80 font-medium">
+                    {runningKey ? (AGENT_LABELS[runningKey] ?? runningKey) : "Pipeline"}
+                  </span>
+                  <span className="text-white/40 truncate flex-1">{activity || "Working…"}</span>
+                  <span className="text-white/30 tabular-nums flex-shrink-0">
+                    Step {stepIdx} of {AGENT_ORDER.length} · {Math.round(progressPct)}%
+                  </span>
+                </div>
+              );
+            })()}
+
             <div className="grid grid-cols-2 gap-2 mt-4">
               {AGENT_ORDER.map((key) => {
                 const agentData = agentStatuses[key];
@@ -572,6 +594,15 @@ export default function AgentsPage() {
               </div>
             )}
           </GlassCard>
+
+          {/* Post-Execution Review — full audit report from real trace data */}
+          {pipelineDone && (
+            <PostExecutionReview
+              agentStatuses={agentStatuses}
+              run={activeRun}
+              elapsedSec={elapsedSec}
+            />
+          )}
 
           {/* Generated Files — all PPT/Excel from every run for this brand */}
           <GeneratedFilesPanel runs={pastRuns} />
@@ -814,6 +845,104 @@ function MetaRow({ icon, title, items }: { icon: React.ReactNode; title: string;
         ))}
       </ul>
     </div>
+  );
+}
+
+// ── Post-Execution Review ─────────────────────────────────────────────────────
+// A full audit report computed entirely from REAL trace data already captured in
+// agentStatuses (durations, steps, sources, files, status). No fabricated metrics:
+// anything we don't instrument (token cost, retries) is shown as "not tracked".
+function PostExecutionReview({
+  agentStatuses, run, elapsedSec,
+}: { agentStatuses: AgentStatuses; run: AgentRun | null; elapsedSec: number }) {
+  const entries = AGENT_ORDER
+    .map((k) => [k, agentStatuses[k]] as const)
+    .filter((e): e is readonly [string, AgentExecution] => !!e[1]);
+
+  if (entries.length === 0) return null;
+
+  const used        = entries.length;
+  const completed   = entries.filter(([, v]) => v.status === "completed").length;
+  const failed      = entries.filter(([, v]) => v.status === "failed").length;
+  const totalSteps  = entries.reduce((n, [, v]) => n + (v.steps?.length || 0), 0);
+  const totalSources= entries.reduce((n, [, v]) => n + (v.sources_analyzed?.length || 0), 0);
+  const platforms   = Array.from(new Set(entries.flatMap(([, v]) => v.platforms_checked || [])));
+  const filesTraced = entries.reduce((n, [, v]) => n + (v.files_generated?.length || 0), 0);
+  const deliverables= (run?.pptUrl ? 1 : 0) + (run?.excelUrl ? 1 : 0)
+                      + (run?.designAssets?.length || 0) + filesTraced;
+  const successScore= used ? Math.round((completed / used) * 100) : 0;
+
+  // Consolidated cross-agent execution timeline (real step timestamps, sorted).
+  const timeline = entries
+    .flatMap(([k, v]) => (v.steps || []).map((s) => ({ agent: k, label: s.label, ts: s.timestamp })))
+    .filter((s) => !!s.ts)
+    .sort((a, b) => new Date(a.ts!).getTime() - new Date(b.ts!).getTime());
+
+  const stat = (label: string, value: React.ReactNode, color = "text-white") => (
+    <div className="rounded-xl bg-dark-base/60 border border-white/5 p-3">
+      <p className={`text-xl font-bold ${color}`}>{value}</p>
+      <p className="text-[10px] text-white/40 uppercase tracking-widest mt-0.5">{label}</p>
+    </div>
+  );
+
+  return (
+    <GlassCard className="p-5 mt-4">
+      <div className="flex items-center gap-2 mb-4">
+        <ListChecks className="w-4 h-4 text-brand-light" />
+        <h2 className="font-semibold text-white text-sm">Post-Execution Review</h2>
+        <span className="text-xs text-white/30 ml-auto">audit report · measured data only</span>
+      </div>
+
+      <div className="grid grid-cols-4 gap-2">
+        {stat("Agents Used", used)}
+        {stat("Success Score", `${successScore}%`, successScore >= 100 ? "text-emerald-400" : successScore >= 60 ? "text-amber-400" : "text-red-400")}
+        {stat("Tasks / Steps", totalSteps)}
+        {stat("Data Sources", totalSources)}
+        {stat("Platforms Checked", platforms.length)}
+        {stat("Assets Generated", deliverables)}
+        {stat("Failed Actions", failed, failed ? "text-red-400" : "text-emerald-400")}
+        {stat("Total Time", `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`)}
+      </div>
+
+      {/* Time spent per agent */}
+      <div className="mt-4">
+        <p className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-2">Time Spent Per Agent</p>
+        <div className="space-y-1">
+          {entries.map(([k, v]) => (
+            <div key={k} className="flex items-center gap-2 text-xs">
+              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                v.status === "completed" ? "bg-emerald-400"
+                : v.status === "failed" ? "bg-red-400"
+                : v.status === "running" ? "bg-brand-light animate-pulse" : "bg-white/20"}`} />
+              <span className="text-white/70 w-40 truncate">{AGENT_LABELS[k] ?? k}</span>
+              <span className="text-white/30 tabular-nums">{fmtDuration(v.durationMs)}</span>
+              <span className="text-white/20 ml-auto">{v.steps?.length || 0} steps · {v.sources_analyzed?.length || 0} sources</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Consolidated execution timeline */}
+      {timeline.length > 0 && (
+        <div className="mt-4">
+          <p className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-2">Execution Timeline</p>
+          <div className="bg-dark-base/60 rounded-xl p-3 max-h-56 overflow-y-auto font-mono text-[11px] space-y-1">
+            {timeline.map((t, i) => (
+              <div key={i} className="flex gap-2 leading-relaxed">
+                <span className="text-white/25 tabular-nums flex-shrink-0">{fmtClock(t.ts)}</span>
+                <span className="text-brand-light/70 flex-shrink-0">[{AGENT_LABELS[t.agent] ?? t.agent}]</span>
+                <span className="text-white/60">{t.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p className="text-[10px] text-white/25 mt-3 italic">
+        Token cost and retry counts are not currently instrumented and are intentionally omitted
+        rather than estimated. All figures above are measured from the live run.
+      </p>
+    </GlassCard>
   );
 }
 
