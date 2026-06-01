@@ -274,20 +274,33 @@ def _build_ig_audit(
         else:
             not_working.append(entry)
 
-    # Best content type
-    best_ct = max(content_types, key=content_types.get) if content_types else "Reel"
+    # Best content type — only meaningful when there's actual content data.
+    # When posts_analysed=0 the "best format" claim is fabricated, so suppress it.
+    best_ct = max(content_types, key=content_types.get) if content_types else None
 
-    # Goal: user-supplied target → 90-day KPI estimate → 10% auto-growth
+    # Goal calculator (spec §growth_calculator):
+    # - Reject any user-supplied goal that is BELOW current followers — that's the
+    #   "Current: 405, Target: 100, INVALID, Auto regenerate" case in the spec.
+    # - Reject a goal that exactly equals current (no growth = no plan).
+    # - When invalid, auto-regenerate using a sensible default (1.5x or +200, whichever larger).
     current_followers = followers
-    if follower_goal is not None and follower_goal > 0:
-        goal_followers = follower_goal
-    elif followers > 0:
-        # Use actual followers (live OR stored) for 10% auto-growth target
-        goal_followers = max(followers + 100, int(followers * 1.1))
+    goal_was_invalid  = False
+    if follower_goal is not None and isinstance(follower_goal, (int, float)) and follower_goal > current_followers:
+        goal_followers = int(follower_goal)
+    elif current_followers > 0:
+        # Auto-regenerate: 50% growth or +200 followers, whichever is larger
+        goal_followers = max(current_followers + 200, int(current_followers * 1.5))
+        if follower_goal is not None and follower_goal > 0 and follower_goal <= current_followers:
+            goal_was_invalid = True
     else:
         kpi = (analyst_report.get("kpi_targets_90day") or {})
         goal_followers = int(kpi.get("followers", 0)) or 500
     gap = max(goal_followers - current_followers, 0)
+
+    # Data-availability flags (spec §data_validation_system):
+    # When metrics are truly unmeasured, surface them as "Data Unavailable" rather
+    # than "0" — and let downstream slides skip content-performance fabrication.
+    has_live_metrics = ig_connected and (len(top_posts) > 0)
 
     return {
         "ig_connected":     ig_connected,
@@ -299,6 +312,9 @@ def _build_ig_audit(
         "avg_er":           round(avg_er, 2),
         "avg_reach":        avg_reach,
         "best_content_type": best_ct,
+        # New: data-quality flags consumed by the PPT layer
+        "has_live_metrics":  has_live_metrics,
+        "goal_was_invalid":  goal_was_invalid,
         "content_type_mix": content_types,
         "working_posts":    working[:5],
         "not_working_posts": not_working[:5],
@@ -831,12 +847,24 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         # ── Slide 2: Executive Summary ──
         s = prs.slides.add_slide(blank); bg(s, dark)
         slide_header(s, "01  ·  EXECUTIVE SUMMARY", "The bottom line — what we found and what it means.")
-        prob     = feas.get("probability_pct", 70)
-        prob_col = green if prob >= 70 else (amber if prob >= 40 else red)
+        # Surface data-quality warnings at the top of the deck.
+        warnings = []
+        if ig_audit.get("goal_was_invalid"):
+            warnings.append(f"⚠ Goal regenerated — submitted target was below current followers (auto-set to {goal:,})")
+        if not ig_audit.get("has_live_metrics"):
+            warnings.append("⚠ Limited audit — Instagram not connected. Connect IG for live content performance metrics.")
+        if warnings:
+            txt(s, "  ·  ".join(warnings)[:170], Inches(0.4), Inches(0.95), Inches(9.2), Inches(0.28), 8, color=amber, italic=True)
+        has_live  = ig_audit.get("has_live_metrics", False)
+        prob      = feas.get("probability_pct", 70)
+        prob_col  = green if prob >= 70 else (amber if prob >= 40 else red)
+        # Spec §data_validation_system: never show '0' for unmeasured metrics.
+        er_disp   = f"{avg_er}%" if has_live and avg_er > 0 else "Data Unavailable"
+        er_col    = accent if (has_live and avg_er > 0) else grey
         exec_stats = [
             (f"{followers:,}",    "Current Followers", brand_color),
             (f"{goal:,}",         "Growth Target",     green),
-            (f"{avg_er}%",        "Engagement Rate",   accent),
+            (er_disp,             "Engagement Rate",   er_col),
             (f"{prob}%",          "Goal Probability",  prob_col),
             (f"{feas.get('acceleration_needed',1)}x", "Growth Needed", amber),
         ]
@@ -864,32 +892,41 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         bar(s, Inches(0.3), Inches(1.15), Inches(4.5), Inches(3.95), mid_dark)
         bar(s, Inches(0.3), Inches(1.15), Inches(4.5), Inches(0.05), brand_color)
         txt(s, "BRAND PROFILE", Inches(0.45), Inches(1.23), Inches(4.2), Inches(0.3), 8, color=brand_color, bold=True)
-        brand_fields = [f"Niche: {brand.get('niche','')[:45]}", f"Industry: {brand.get('industry','')[:45]}",
-                        f"Positioning: {positioning[:65]}", f"Differentiator: {differentiation[:65]}"]
+        # Wider field budget — values wrap into the 0.85"-tall textbox at 10pt.
+        brand_fields = [f"Niche: {brand.get('niche','')[:90]}", f"Industry: {brand.get('industry','')[:90]}",
+                        f"Positioning: {positioning[:140]}", f"Differentiator: {differentiation[:140]}"]
         for j, bf in enumerate([f for f in brand_fields if not f.endswith(": ")][:4]):
-            txt(s, bf, Inches(0.45), Inches(1.6+j*0.7), Inches(4.2), Inches(0.62), 10, color=light)
+            txt(s, bf, Inches(0.45), Inches(1.6+j*0.85), Inches(4.2), Inches(0.85), 10, color=light)
         bar(s, Inches(5.0), Inches(1.15), Inches(4.7), Inches(3.95), mid_dark)
         bar(s, Inches(5.0), Inches(1.15), Inches(4.7), Inches(0.05), accent)
         txt(s, "TARGET AUDIENCE", Inches(5.15), Inches(1.23), Inches(4.4), Inches(0.3), 8, color=accent, bold=True)
-        aud_fields = [f"Audience: {brand.get('targetAudience','')[:65]}", f"Pain Points: {pain_points[:65]}", f"Aspirations: {aspirations[:65]}"]
+        aud_fields = [f"Audience: {brand.get('targetAudience','')[:160]}", f"Pain Points: {pain_points[:160]}", f"Aspirations: {aspirations[:160]}"]
         for j, af in enumerate([f for f in aud_fields if not f.endswith(": ")][:4]):
-            txt(s, af, Inches(5.15), Inches(1.6+j*0.7), Inches(4.4), Inches(0.62), 10, color=light)
+            txt(s, af, Inches(5.15), Inches(1.6+j*1.1), Inches(4.4), Inches(1.1), 10, color=light)
         footer(s, 3)
 
         # ── Slide 4: Social Media Audit ──
         s = prs.slides.add_slide(blank); bg(s, dark)
-        slide_header(s, "03  ·  SOCIAL MEDIA AUDIT", "Where you stand today — real numbers.")
-        if ig_connected and followers > 0:
-            mode_label = f"Live Instagram data  ·  {ig_audit.get('posts_analysed', 0)} posts analysed"
+        slide_header(s, "03  ·  SOCIAL MEDIA AUDIT", "Where you stand today — measured numbers, not guesses.")
+        if ig_connected and followers > 0 and ig_audit.get("posts_analysed", 0) > 0:
+            mode_label = f"Live Instagram data  ·  {ig_audit.get('posts_analysed', 0)} posts analysed  ·  Source: Meta Graph API  ·  Confidence: high"
         elif followers > 0:
-            mode_label = f"Stored data ({followers:,} followers)  ·  Connect IG for live metrics"
+            mode_label = f"Stored data — {followers:,} followers verified  ·  Source: brand profile  ·  Confidence: medium  ·  Connect IG for live engagement metrics"
         else:
-            mode_label = "Launch Mode  ·  Targets based on brand brief + market research (connect IG for live metrics)"
+            mode_label = "Launch Mode  ·  No social profile connected  ·  Confidence: low  ·  Targets based on brand brief + niche research"
         txt(s, mode_label, Inches(0.4), Inches(0.95), Inches(9.2), Inches(0.28), 9, color=grey, italic=True)
+        # Spec §data_validation_system: 'Data Unavailable' beats a misleading '0'.
+        posts_n     = ig_audit.get("posts_analysed", 0)
+        er_v        = f"{avg_er}%"                if has_live and avg_er > 0    else "Data Unavailable"
+        reach_v     = f"{avg_reach:,}"            if has_live and avg_reach > 0 else "Data Unavailable"
+        best_fmt_v  = ig_audit.get("best_content_type") or ("—" if posts_n == 0 else "Reel")
+        posts_v     = f"{posts_n}"                if posts_n > 0                else "Data Unavailable"
         snap_stats = [
-            (f"{followers:,}", "Followers", brand_color), (f"{avg_er}%", "Eng. Rate", green),
-            (f"{avg_reach:,}", "Avg Reach", accent), (ig_audit.get("best_content_type","Reel"), "Best Format", amber),
-            (str(ig_audit.get("posts_analysed",0)), "Posts Analysed", white),
+            (f"{followers:,}", "Followers",       brand_color),
+            (er_v,              "Eng. Rate",      green if er_v != "Data Unavailable" else grey),
+            (reach_v,           "Avg Reach",      accent if reach_v != "Data Unavailable" else grey),
+            (best_fmt_v,        "Best Format",    amber if best_fmt_v not in ("Data Unavailable","—") else grey),
+            (posts_v,           "Posts Analysed", white if posts_v != "Data Unavailable" else grey),
         ]
         for i, (val, lbl, col) in enumerate(snap_stats):
             x = Inches(0.3 + i * 1.9)
@@ -909,55 +946,87 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         footer(s, 4)
 
         # ── Slide 5: Content Performance — What's Working ──
+        # Spec §quality_control: reject Posts Analysed=0 + Best Content Exists.
+        # When there's no live data, show an honest "connect IG" panel rather than
+        # fabricating insights about posts that don't exist.
         s = prs.slides.add_slide(blank); bg(s, dark)
         slide_header(s, "04  ·  CONTENT PERFORMANCE — WHAT'S WORKING", "The formula behind your top-performing content.")
-        best_bd  = ep.get("content_best_breakdown") or {}
-        diag     = strategy.get("performance_diagnosis") or {}
-        working  = (diag.get("whats_working") or strategy.get("what_works") or [])[:4]
-        bar(s, Inches(0.3), Inches(1.15), Inches(4.5), Inches(3.95), mid_dark)
-        bar(s, Inches(0.3), Inches(1.15), Inches(4.5), Inches(0.05), green)
-        txt(s, "WHAT'S WORKING", Inches(0.45), Inches(1.23), Inches(4.2), Inches(0.3), 8, color=green, bold=True)
-        for j, item in enumerate(working[:4]):
-            txt(s, f"✓  {str(item)[:70]}", Inches(0.45), Inches(1.62+j*0.77), Inches(4.2), Inches(0.68), 10, color=light)
-        bar(s, Inches(5.0), Inches(1.15), Inches(4.7), Inches(3.95), mid_dark)
-        bar(s, Inches(5.0), Inches(1.15), Inches(4.7), Inches(0.05), accent)
-        txt(s, "REPLICABLE FORMULA", Inches(5.15), Inches(1.23), Inches(4.4), Inches(0.3), 8, color=accent, bold=True)
-        formula = []
-        if best_bd:
-            if best_bd.get("hook_pattern"): formula.append(f"Hook: {str(best_bd['hook_pattern'])[:65]}")
-            why = best_bd.get("why_it_worked")
-            if isinstance(why, list): formula.extend([str(w)[:65] for w in why[:2]])
-            elif why: formula.append(str(why)[:65])
-            if best_bd.get("replicable_formula"): formula.append(f"Formula: {str(best_bd['replicable_formula'])[:60]}")
-            if best_bd.get("recommended_frequency"): formula.append(f"Frequency: {best_bd['recommended_frequency']}")
-        formula = formula or (strategy.get("hook_strategy") or [])[:4]
-        for j, item in enumerate(formula[:4]):
-            txt(s, f"→  {str(item)[:70]}", Inches(5.15), Inches(1.62+j*0.77), Inches(4.4), Inches(0.68), 10, color=light)
-        footer(s, 5)
+        if not has_live:
+            bar(s, Inches(0.3), Inches(1.5), Inches(9.4), Inches(3.0), mid_dark)
+            bar(s, Inches(0.3), Inches(1.5), Inches(9.4), Inches(0.05), amber)
+            txt(s, "CONTENT PERFORMANCE DATA UNAVAILABLE", Inches(0.5), Inches(1.7), Inches(9), Inches(0.4), 14, bold=True, color=amber)
+            txt(s, "Connect Instagram to enable content performance analysis.",
+                Inches(0.5), Inches(2.25), Inches(9), Inches(0.4), 12, color=white)
+            txt(s, "Per data-quality rules, this report does not generate 'what worked' insights",
+                Inches(0.5), Inches(2.75), Inches(9), Inches(0.35), 10, color=light)
+            txt(s, "without measured post-level data. Once IG is connected, this slide will populate",
+                Inches(0.5), Inches(3.05), Inches(9), Inches(0.35), 10, color=light)
+            txt(s, "with the actual hook pattern, replicable formula, and frequency that drove your top posts.",
+                Inches(0.5), Inches(3.35), Inches(9), Inches(0.35), 10, color=light)
+            footer(s, 5)
+            # Skip to slide 6
+            _skip_working = True
+        else:
+            _skip_working = False
+        if not _skip_working:
+            best_bd  = ep.get("content_best_breakdown") or {}
+            diag     = strategy.get("performance_diagnosis") or {}
+            working  = (diag.get("whats_working") or strategy.get("what_works") or [])[:4]
+            bar(s, Inches(0.3), Inches(1.15), Inches(4.5), Inches(3.95), mid_dark)
+            bar(s, Inches(0.3), Inches(1.15), Inches(4.5), Inches(0.05), green)
+            txt(s, "WHAT'S WORKING", Inches(0.45), Inches(1.23), Inches(4.2), Inches(0.3), 8, color=green, bold=True)
+            for j, item in enumerate(working[:4]):
+                txt(s, f"✓  {str(item)[:70]}", Inches(0.45), Inches(1.62+j*0.77), Inches(4.2), Inches(0.68), 10, color=light)
+            bar(s, Inches(5.0), Inches(1.15), Inches(4.7), Inches(3.95), mid_dark)
+            bar(s, Inches(5.0), Inches(1.15), Inches(4.7), Inches(0.05), accent)
+            txt(s, "REPLICABLE FORMULA", Inches(5.15), Inches(1.23), Inches(4.4), Inches(0.3), 8, color=accent, bold=True)
+            formula = []
+            if best_bd:
+                if best_bd.get("hook_pattern"): formula.append(f"Hook: {str(best_bd['hook_pattern'])[:65]}")
+                why = best_bd.get("why_it_worked")
+                if isinstance(why, list): formula.extend([str(w)[:65] for w in why[:2]])
+                elif why: formula.append(str(why)[:65])
+                if best_bd.get("replicable_formula"): formula.append(f"Formula: {str(best_bd['replicable_formula'])[:60]}")
+                if best_bd.get("recommended_frequency"): formula.append(f"Frequency: {best_bd['recommended_frequency']}")
+            formula = formula or (strategy.get("hook_strategy") or [])[:4]
+            for j, item in enumerate(formula[:4]):
+                txt(s, f"→  {str(item)[:70]}", Inches(5.15), Inches(1.62+j*0.77), Inches(4.4), Inches(0.68), 10, color=light)
+            footer(s, 5)
 
         # ── Slide 6: Content Performance — What's Failing ──
         s = prs.slides.add_slide(blank); bg(s, dark)
         slide_header(s, "05  ·  CONTENT PERFORMANCE — WHAT'S FAILING", "Stop doing this. Pivot here instead.")
-        worst_bd = ep.get("content_worst_breakdown") or {}
-        failing  = (diag.get("whats_failing") or strategy.get("what_to_stop") or [])[:4]
-        bar(s, Inches(0.3), Inches(1.15), Inches(4.5), Inches(3.95), mid_dark)
-        bar(s, Inches(0.3), Inches(1.15), Inches(4.5), Inches(0.05), red)
-        txt(s, "WHAT'S FAILING", Inches(0.45), Inches(1.23), Inches(4.2), Inches(0.3), 8, color=red, bold=True)
-        for j, item in enumerate(failing[:4]):
-            txt(s, f"✗  {str(item)[:70]}", Inches(0.45), Inches(1.62+j*0.77), Inches(4.2), Inches(0.68), 10, color=light)
-        bar(s, Inches(5.0), Inches(1.15), Inches(4.7), Inches(3.95), mid_dark)
-        bar(s, Inches(5.0), Inches(1.15), Inches(4.7), Inches(0.05), green)
-        txt(s, "DO THIS INSTEAD", Inches(5.15), Inches(1.23), Inches(4.4), Inches(0.3), 8, color=green, bold=True)
-        pivot = []
-        if worst_bd:
-            wf = worst_bd.get("why_it_failed")
-            if isinstance(wf, list): pivot.extend([str(w)[:65] for w in wf[:2]])
-            elif wf: pivot.append(str(wf)[:65])
-            if worst_bd.get("what_to_do_instead"): pivot.append(f"→ {str(worst_bd['what_to_do_instead'])[:65]}")
-        pivot = pivot or (diag.get("missed_opportunities") or strategy.get("content_series_ideas") or [])[:4]
-        for j, item in enumerate(pivot[:4]):
-            txt(s, f"→  {str(item)[:70]}", Inches(5.15), Inches(1.62+j*0.77), Inches(4.4), Inches(0.68), 10, color=light)
-        footer(s, 6)
+        if not has_live:
+            bar(s, Inches(0.3), Inches(1.5), Inches(9.4), Inches(3.0), mid_dark)
+            bar(s, Inches(0.3), Inches(1.5), Inches(9.4), Inches(0.05), amber)
+            txt(s, "FAILURE PATTERN DATA UNAVAILABLE", Inches(0.5), Inches(1.7), Inches(9), Inches(0.4), 14, bold=True, color=amber)
+            txt(s, "Connect Instagram so we can identify your actual underperforming patterns —",
+                Inches(0.5), Inches(2.25), Inches(9), Inches(0.4), 12, color=white)
+            txt(s, "what to stop, what to do instead, and the specific formats that aren't earning their place.",
+                Inches(0.5), Inches(2.65), Inches(9), Inches(0.4), 11, color=light)
+            footer(s, 6)
+        else:
+            worst_bd = ep.get("content_worst_breakdown") or {}
+            diag    = strategy.get("performance_diagnosis") or {}
+            failing = (diag.get("whats_failing") or strategy.get("what_to_stop") or [])[:4]
+            bar(s, Inches(0.3), Inches(1.15), Inches(4.5), Inches(3.95), mid_dark)
+            bar(s, Inches(0.3), Inches(1.15), Inches(4.5), Inches(0.05), red)
+            txt(s, "WHAT'S FAILING", Inches(0.45), Inches(1.23), Inches(4.2), Inches(0.3), 8, color=red, bold=True)
+            for j, item in enumerate(failing[:4]):
+                txt(s, f"✗  {str(item)[:70]}", Inches(0.45), Inches(1.62+j*0.77), Inches(4.2), Inches(0.68), 10, color=light)
+            bar(s, Inches(5.0), Inches(1.15), Inches(4.7), Inches(3.95), mid_dark)
+            bar(s, Inches(5.0), Inches(1.15), Inches(4.7), Inches(0.05), green)
+            txt(s, "DO THIS INSTEAD", Inches(5.15), Inches(1.23), Inches(4.4), Inches(0.3), 8, color=green, bold=True)
+            pivot = []
+            if worst_bd:
+                wf = worst_bd.get("why_it_failed")
+                if isinstance(wf, list): pivot.extend([str(w)[:65] for w in wf[:2]])
+                elif wf: pivot.append(str(wf)[:65])
+                if worst_bd.get("what_to_do_instead"): pivot.append(f"→ {str(worst_bd['what_to_do_instead'])[:65]}")
+            pivot = pivot or (diag.get("missed_opportunities") or strategy.get("content_series_ideas") or [])[:4]
+            for j, item in enumerate(pivot[:4]):
+                txt(s, f"→  {str(item)[:70]}", Inches(5.15), Inches(1.62+j*0.77), Inches(4.4), Inches(0.68), 10, color=light)
+            footer(s, 6)
 
         # ── Slide 7: Market Research & Industry Trends ──
         s = prs.slides.add_slide(blank); bg(s, dark)
@@ -1114,12 +1183,22 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         s = prs.slides.add_slide(blank); bg(s, dark)
         slide_header(s, "12  ·  PERFORMANCE DIAGNOSIS", "What the data is telling us.")
         diag13 = strategy.get("performance_diagnosis") or {}
-        sec13  = [
-            ("WHAT'S WORKING",        green, diag13.get("whats_working")       or strategy.get("what_works")   or ["Top posts show strong ER"]),
-            ("WHAT'S FAILING",        red,   diag13.get("whats_failing")       or strategy.get("what_to_stop") or ["Low-engagement formats"]),
-            ("MISSED OPPORTUNITIES",  amber, diag13.get("missed_opportunities") or ["Untapped trending formats"]),
-            ("BOTTLENECKS",           accent,diag13.get("bottlenecks")          or ["Posting frequency inconsistency"]),
-        ]
+        # When live data is missing, do NOT fabricate Working/Failing claims
+        # about posts that don't exist. Show structural diagnosis only.
+        if has_live:
+            sec13 = [
+                ("WHAT'S WORKING",        green, diag13.get("whats_working")       or strategy.get("what_works")   or ["Top posts show strong ER"]),
+                ("WHAT'S FAILING",        red,   diag13.get("whats_failing")       or strategy.get("what_to_stop") or ["Low-engagement formats"]),
+                ("MISSED OPPORTUNITIES",  amber, diag13.get("missed_opportunities") or ["Untapped trending formats"]),
+                ("BOTTLENECKS",           accent,diag13.get("bottlenecks")          or ["Posting frequency inconsistency"]),
+            ]
+        else:
+            sec13 = [
+                ("STRUCTURAL OPPORTUNITIES", amber,  diag13.get("missed_opportunities") or ["Connect IG to identify untapped niche formats"]),
+                ("STRUCTURAL BOTTLENECKS",   accent, diag13.get("bottlenecks")          or ["No live content history to learn from"]),
+                ("RESEARCH-BASED ANGLES",    green,  (rd.get("trending_angles") or ["See market research"])[:3]),
+                ("COMPETITOR-DERIVED GAPS",  brand_color, (cd.get("content_gaps") or ["See competitor analysis"])[:3]),
+            ]
         for i, (title, col, items) in enumerate(sec13):
             row, ci = divmod(i, 2)
             x = Inches(0.3+ci*4.8); y = Inches(1.15+row*2.12)
