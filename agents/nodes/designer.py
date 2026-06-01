@@ -33,6 +33,48 @@ VISUAL_TYPES = {"Graphic", "AI Reel", "Carousel"}
 # Max images per run (cost control)
 MAX_IMAGES = 6
 
+# ── Design classification (autonomous content-type detection) ────────────────
+# Maps a post (content type + topic + copy) to a creative-strategy category so
+# the prompt engine can pick the right layout, emotional trigger and CTA placement.
+_CLASS_KEYWORDS = {
+    "Offer Post":       ("offer", "sale", "discount", "deal", "% off", "coupon", "limited", "price", "buy"),
+    "Announcement":     ("announc", "launch", "introducing", "new ", "now live", "coming soon", "update"),
+    "Testimonial":      ("testimonial", "review", "client said", "customer", "result", "transformation", "case study"),
+    "Comparison":       ("vs", "versus", "before/after", "before and after", "compare", "this or that"),
+    "Product Showcase": ("product", "feature", "showcase", "how it works", "demo", "inside"),
+    "Lead Magnet":      ("free", "download", "guide", "checklist", "ebook", "template", "cheat sheet", "webinar"),
+    "Educational":      ("how to", "tips", "steps", "mistakes", "guide", "learn", "explained", "myth", "why "),
+    "Storytelling Post":("story", "journey", "i used to", "behind the scenes", "my ", "we started"),
+}
+
+
+def _classify_design(post: dict) -> str:
+    """Autonomously classify the design category from content type + copy."""
+    ct = post.get("contentType", "")
+    if ct == "Carousel":
+        return "Carousel"
+    blob = " ".join(str(post.get(k, "")) for k in
+                     ("topic", "caption_long", "caption", "hook", "cta", "copy_brief")).lower()
+    for category, kws in _CLASS_KEYWORDS.items():
+        if any(k in blob for k in kws):
+            return category
+    return "Static Graphic"
+
+
+# Per-category creative strategy: emotional trigger · attention strategy · layout.
+_CATEGORY_STRATEGY = {
+    "Static Graphic":   ("clarity + authority", "bold headline as the focal point", "single-focus centered composition with generous negative space"),
+    "Carousel":         ("curiosity → resolution", "scroll-stopping cover that opens a loop", "consistent slide system, strong left-aligned hierarchy"),
+    "Offer Post":       ("urgency + value", "the offer/number is the hero", "high-contrast badge layout, price/percentage dominant"),
+    "Announcement":     ("excitement + novelty", "'new' signalled instantly", "spotlight composition, product/news centered"),
+    "Testimonial":      ("trust + social proof", "the result/quote carries the frame", "quote-card layout with attribution and proof"),
+    "Educational":      ("authority + usefulness", "promise of a clear takeaway", "numbered/step layout, clean infographic structure"),
+    "Comparison":       ("contrast + insight", "the two sides clash visually", "split-screen 50/50 composition"),
+    "Product Showcase": ("desire + clarity", "the product is hero-lit", "product-centric composition with breathing room"),
+    "Storytelling Post":("emotion + relatability", "a human, candid moment", "documentary/lifestyle framing, authentic feel"),
+    "Lead Magnet":      ("value + low friction", "the freebie is unmissable", "asset-mockup layout with a clear claim path"),
+}
+
 # Lazy Supabase singleton — initialized on first use to ensure .env is loaded
 _supabase: SupabaseClient | None = None
 
@@ -114,37 +156,169 @@ async def designer_node(state: SocialOSState, event_queue: asyncio.Queue) -> dic
     }
 
 
+# ── JSON Prompt Engine ────────────────────────────────────────────────────────
+# Converts a finished post + brand assets into an ultra-detailed, structured
+# design spec. The copy already exists (Copywriter); the Designer's job is to
+# turn it into a visual blueprint, then compose a high-fidelity image prompt
+# from it. Deterministic → fast, free, reproducible, fully auditable.
+
+_VISUAL_STYLE_BY_TONE = {
+    "professional": "clean modern editorial, premium minimal, confident",
+    "friendly":     "warm approachable, soft rounded shapes, inviting",
+    "bold":         "high-contrast bold, punchy, energetic",
+    "luxury":       "elegant premium, refined, lots of negative space",
+    "playful":      "vibrant playful, dynamic, fun",
+    "minimal":      "ultra-minimal, lots of whitespace, single focal point",
+}
+
+# Keep the proven square for Graphic/Carousel; only Reels go vertical. Unknown
+# values degrade gracefully (Freepik returns non-2xx → image skipped, no crash).
+_ASPECT_BY_TYPE = {"AI Reel": "9_16", "Carousel": "1_1", "Graphic": "1_1"}
+
+# Standard agency-grade negatives — kills the things QC would otherwise reject.
+_BASE_NEGATIVES = [
+    "gibberish text", "garbled letters", "misspelled words", "lorem ipsum",
+    "watermark", "logo artifacts", "stock-photo cliché", "extra fingers",
+    "distorted faces", "low resolution", "jpeg artifacts", "cluttered layout",
+    "busy background", "muddy colors", "amateur", "template look", "clip art",
+]
+
+
+def _palette_from_brand(brand: dict) -> list[str]:
+    colors = brand.get("colors") or {}
+    if not isinstance(colors, dict):
+        return ["#6C3CE1"]
+    pal = []
+    for k in ("primary", "secondary", "accent"):
+        v = colors.get(k)
+        if v:
+            pal.append(v)
+    extra = colors.get("palette") or []
+    if isinstance(extra, list):
+        pal.extend([c for c in extra if c])
+    return pal or ["#6C3CE1"]
+
+
+def _design_copy(post: dict, category: str) -> dict:
+    """Pull the headline / subheadline / cta the visual should carry."""
+    gl = post.get("graphic_layout") if isinstance(post.get("graphic_layout"), dict) else {}
+    slides = post.get("carousel_slides") or []
+    cover = slides[0] if slides and isinstance(slides[0], dict) else {}
+    headline = (gl.get("headline") or cover.get("headline")
+                or (post.get("hook_variations") or [None])[0] or post.get("hook")
+                or post.get("topic") or "")
+    subheadline = gl.get("subheadline") or cover.get("on_slide_text") or ""
+    cta = post.get("cta") or gl.get("footer_text") or ""
+    supporting = gl.get("supporting_elements") or []
+    return {
+        "headline": str(headline)[:90],
+        "subheadline": str(subheadline)[:90],
+        "cta": str(cta)[:60],
+        "supporting": [str(s)[:60] for s in supporting[:4]],
+    }
+
+
+def _build_design_json(post: dict, brand: dict, category: str) -> dict:
+    """The ultra-detailed JSON prompt spec (json_prompt_engine)."""
+    ct       = post.get("contentType", "Graphic")
+    tone     = (brand.get("tone") or "professional")
+    tone_key = next((k for k in _VISUAL_STYLE_BY_TONE if k in tone.lower()), "professional")
+    palette  = _palette_from_brand(brand)
+    copy     = _design_copy(post, category)
+    trigger, attention, layout = _CATEGORY_STRATEGY.get(
+        category, _CATEGORY_STRATEGY["Static Graphic"])
+    typography = (brand.get("voiceStyle") or "modern geometric sans-serif, strong weight contrast")
+
+    return {
+        "design_type":      category,
+        "platform":         "Instagram",
+        "brand_name":       brand.get("name", ""),
+        "industry":         brand.get("industry") or brand.get("niche", ""),
+        "target_audience":  brand.get("targetAudience", ""),
+        "visual_style":     _VISUAL_STYLE_BY_TONE[tone_key],
+        "design_goal":      f"{trigger}; {attention}",
+        "layout_structure": layout,
+        "color_palette":    ", ".join(palette),
+        "typography":       typography,
+        "headline":         copy["headline"],
+        "subheadline":      copy["subheadline"],
+        "cta":              copy["cta"],
+        "visual_elements":  copy["supporting"] or [f"{brand.get('niche','')} context imagery"],
+        "icons":            [],
+        "illustrations":    [],
+        "composition":      layout,
+        "lighting":         "soft directional studio light, gentle gradient",
+        "depth":            "subtle depth of field, layered foreground/background",
+        "background_style": "on-brand gradient or clean solid that supports text contrast",
+        "brand_guidelines": f"use {palette[0]} as the dominant brand color; keep clear space for text overlay",
+        "image_size":       _ASPECT_BY_TYPE.get(ct, "1_1"),
+        "negative_prompts": _BASE_NEGATIVES,
+    }
+
+
+def _json_to_prompt(dj: dict) -> tuple[str, str]:
+    """Compose a high-fidelity Freepik prompt + negative string from the JSON spec."""
+    parts = [
+        f"{dj['design_type']} for {dj['platform']} — {dj['industry']} brand"
+        + (f" '{dj['brand_name']}'" if dj['brand_name'] else "") + ".",
+        f"Visual style: {dj['visual_style']}.",
+        f"Composition: {dj['composition']}.",
+        f"Design goal: {dj['design_goal']}.",
+        f"Color palette: {dj['color_palette']} (dominant {dj['color_palette'].split(',')[0].strip()}).",
+        f"Lighting: {dj['lighting']}. Depth: {dj['depth']}. Background: {dj['background_style']}.",
+    ]
+    if dj.get("headline"):
+        parts.append(f"Leave clean negative space for a bold headline overlay reading the theme: \"{dj['headline']}\".")
+    if dj.get("visual_elements"):
+        ve = ", ".join(v for v in dj["visual_elements"] if v)
+        if ve:
+            parts.append(f"Include supporting visual elements: {ve}.")
+    parts.append(f"Typography direction (for overlaid text): {dj['typography']}.")
+    parts.append(f"Audience: {dj['target_audience']}." if dj.get("target_audience") else "")
+    parts.append("Agency-grade, scroll-stopping, conversion-focused, strong visual hierarchy, Instagram-ready, ultra high quality.")
+    negative = ", ".join(dj.get("negative_prompts") or _BASE_NEGATIVES)
+    # Fold negatives into the prompt text — keeps the proven Freepik payload shape
+    # intact (no unrecognized fields that could 400 the request).
+    parts.append(f"Avoid: {negative}.")
+    prompt = " ".join(p for p in parts if p)
+    return prompt, negative
+
+
+def _qc_check(dj: dict, image_url: str) -> dict:
+    """Lightweight quality-control gate (quality_control)."""
+    checks = {
+        "image_generated":  bool(image_url),
+        "brand_color_set":  bool(dj.get("color_palette")),
+        "headline_present": bool(dj.get("headline")),
+        "hierarchy_defined":bool(dj.get("layout_structure")),
+        "negatives_applied":bool(dj.get("negative_prompts")),
+    }
+    passed = all(checks.values())
+    return {"passed": passed, "checks": checks}
+
+
 # ── Image Generation ──────────────────────────────────────────────────────────
 
 async def _generate_and_upload(post: dict, brand: dict, run_id: str, idx: int, event_queue) -> dict:
-    topic  = post.get("topic", "brand content")
-    ct     = post.get("contentType", "Graphic")
-    niche  = brand.get("name", "") + " " + brand.get("niche", "")
-    tone   = brand.get("tone", "professional")
-    colors = brand.get("colors") or {}
-    primary_color = colors.get("primary", "#6C3CE1") if isinstance(colors, dict) else "#6C3CE1"
+    topic = post.get("topic", "brand content")
+    ct    = post.get("contentType", "Graphic")
 
-    # Build Freepik prompt
-    style_map = {
-        "Graphic":  "clean minimal social media graphic, flat design, bold typography",
-        "AI Reel":  "cinematic vertical social media thumbnail, vibrant, eye-catching",
-        "Carousel": "instagram carousel slide, professional layout, infographic style",
-    }
-    style = style_map.get(ct, "social media graphic")
-    prompt = (
-        f"{topic}. {niche} brand. {tone} tone. "
-        f"{style}. Brand color {primary_color}. "
-        "High quality, Instagram-ready, 1080x1080px aesthetic."
-    )
+    # 1) classify → 2) build ultra-detailed JSON spec → 3) compose prompt
+    category = _classify_design(post)
+    design_json = _build_design_json(post, brand, category)
+    prompt, negative = _json_to_prompt(design_json)
+    resolution = design_json.get("image_size", "1_1")
 
     await event_queue.put({
         "type": "agent_progress",
         "agentKey": "designer",
-        "message": f"Generating image {idx+1}: {topic[:40]}…",
+        "message": f"Image {idx+1} [{category}]: engineering JSON prompt for '{topic[:34]}'…",
     })
 
-    image_url = await _freepik_generate(prompt)
+    image_url = await _freepik_generate(prompt, resolution=resolution, negative=negative)
 
+    # 4) quality control
+    qc = _qc_check(design_json, image_url)
     if not image_url:
         return {}
 
@@ -154,10 +328,14 @@ async def _generate_and_upload(post: dict, brand: dict, run_id: str, idx: int, e
         "topic":       topic,
         "prompt":      prompt,
         "date":        post.get("date"),
+        # ── New: full provenance for the autonomous designer ──
+        "designCategory": category,
+        "designJson":     design_json,
+        "qc":             qc,
     }
 
 
-async def _freepik_generate(prompt: str) -> str:
+async def _freepik_generate(prompt: str, resolution: str = "1_1", negative: str = "") -> str:
     """Call Freepik Mystic API and poll for result."""
     if not FREEPIK_API_KEY:
         return ""
@@ -168,20 +346,24 @@ async def _freepik_generate(prompt: str) -> str:
         "Accept": "application/json",
     }
 
+    # NOTE: negatives are folded into the prompt text by _json_to_prompt, so the
+    # payload keeps the exact proven shape (no unrecognized fields).
+    payload = {
+        "prompt": prompt,
+        "num_images": 1,
+        "resolution": resolution,
+        "engine": FREEPIK_ENGINE,
+        "creative_detailing": 60,
+        "styling": {"style": "photo"},
+    }
+
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             # Start generation
             start_resp = await client.post(
                 "https://api.freepik.com/v1/ai/mystic",
                 headers=headers,
-                json={
-                    "prompt": prompt,
-                    "num_images": 1,
-                    "resolution": "1_1",
-                    "engine": FREEPIK_ENGINE,
-                    "creative_detailing": 60,
-                    "styling": {"style": "photo"},
-                },
+                json=payload,
             )
 
             if start_resp.status_code not in (200, 201, 202):
