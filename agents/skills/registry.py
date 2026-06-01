@@ -178,3 +178,128 @@ COMPETITOR PROFILING METHODOLOGY — three analysis dimensions:
 
 Use these gaps to build differentiation recommendations — not generic advice.
 """
+
+# ── Anti-AI Language — kill the robotic tells ────────────────────────────────
+
+ANTI_AI_LANGUAGE = """
+ANTI-AI LANGUAGE RULES — copy that reads as AI-written is an automatic fail.
+
+BANNED words / phrases (never output these or their close cousins):
+unlock, unleash, elevate, dive into, delve, leverage, harness, supercharge,
+game-changer, game-changing, revolutionize, seamless, robust, embark, navigate
+the landscape, in today's fast-paced world, look no further, in conclusion,
+when it comes to, the world of, that being said, it's important to note,
+tapestry, testament, realm, foster, cutting-edge, ever-evolving, paradigm,
+take it to the next level, the secret sauce, at the end of the day, needle-moving,
+"✨ unlock the secret ✨", "let's dive in", "buckle up", "spoiler alert".
+
+BANNED structural tells:
+- Opening with a definition ("X is the process of...").
+- Tricolon padding ("fast, easy, and effective").
+- Hedge stacks ("can help to potentially improve").
+- Symmetrical "It's not just X, it's Y" unless it earns its place.
+- Emoji bullet lists where every line starts with the same emoji.
+- Restating the prompt back as the first line.
+
+WRITE LIKE A HUMAN:
+- Start in the middle of a thought, the way a person texts.
+- Use concrete nouns and real numbers, not adjectives.
+- Vary sentence length hard — a 3-word line next to a 20-word line.
+- One idea per line. Cut every word that isn't load-bearing.
+- If a sentence could appear in ANY brand's post, delete it and write the
+  version only THIS brand, in THIS niche, to THIS audience could write.
+"""
+
+# ── Direct-Response Ad Script Framework ──────────────────────────────────────
+
+AD_SCRIPT_FRAMEWORK = """
+AD-CREATIVE SCRIPT STANDARD — every Reel/video script is a performance ad, not
+a narration. It MUST contain all 7 beats, in this order, each doing real work:
+
+1. PATTERN INTERRUPT HOOK (0-2s): a visual or line that breaks the scroll.
+   Show the payoff, the conflict, or the result FIRST. Never a greeting, never
+   a logo, never "Hi guys". The on-screen text in frame 1 IS the hook.
+2. CURIOSITY GAP (2-5s): open a loop the viewer must stay to close
+   ("...but here's what nobody tells you").
+3. EMOTIONAL TRIGGER (5-10s): name the exact feeling — the frustration, the
+   fear of missing out, the relief — in the audience's own words.
+4. PRODUCT / PROOF DEMONSTRATION: show the thing working, the process, the
+   before→after. Demonstrate, don't claim.
+5. SOCIAL PROOF ANGLE: a number, a result, a name, a "12,000 people / 3 years
+   / 47 clients" — concrete evidence, never "lots of people love it".
+6. CLEAR VALUE PROPOSITION: the single transformation the viewer gets, stated
+   in one line. What changes for THEM.
+7. STRONG CTA: one action, one verb, friction-free. Match the awareness stage
+   (follow/save for cold, DM/link for warm).
+
+SHOT DISCIPLINE:
+- Each shot = a distinct visual. If two shots look identical, merge them.
+- Write on_screen_text as if the sound is OFF (80% watch muted).
+- Pattern interrupt again at the midpoint to re-hook drop-offs.
+- End on a loop or a question that recontextualises the opening.
+
+Generate MULTIPLE creative directions (distinct concepts, not reworded copies):
+e.g. (a) talking-head POV, (b) faceless screen-record / b-roll, (c) skit /
+problem-reenactment. Each direction implies a different shot list.
+"""
+
+# ── Conversion Copywriting Frameworks (PAS + Direct Response) ────────────────
+
+CONVERSION_FRAMEWORKS = """
+CONVERSION COPY FRAMEWORKS — pick the one that fits the post's job:
+
+PAS (Problem · Agitate · Solve) — best for pain-driven / decision content:
+  Problem  — name the specific problem in the reader's exact words.
+  Agitate  — make the cost of inaction felt (time lost, money burned, status risk).
+  Solve    — present the brand's approach as the relief. One CTA.
+
+AIDA — best for awareness / discovery content (see AIDA_STRUCTURE).
+
+BAB (Before · After · Bridge) — best for transformation / results content:
+  Before — the stuck state. After — the desired state. Bridge — how to cross.
+
+DIRECT-RESPONSE PRINCIPLES (apply to all):
+  - Specificity beats superlatives: "+312 followers in 14 days" > "huge growth".
+  - One reader, one problem, one promise, one CTA per asset.
+  - Sell the outcome and the feeling, not the feature.
+  - Credibility: every claim needs a proof element or it gets cut.
+  - Reduce friction at the CTA: tell them exactly what happens next.
+"""
+
+# ── Growth Roadmap + Strategic Thinking (consultant-grade) ───────────────────
+
+GROWTH_ROADMAP_FRAMEWORK = """
+GROWTH ROADMAP STANDARD — recommendations are worthless without sequencing,
+ownership, and measurement. Structure execution across four horizons:
+
+  QUICK WINS  (1-7 days)   — low effort, fast signal, builds momentum.
+  SHORT TERM  (30 days)    — the core engine: cadence, formats, systems.
+  MID TERM    (90 days)    — compounding plays: collabs, series, repurposing.
+  LONG TERM   (6-12 months)— moats: authority, owned audience, product pull.
+
+Every roadmap item MUST specify:
+  action · owner · resources_required · expected_result · kpi · priority(P0/P1/P2)
+
+Every individual recommendation MUST carry:
+  why_it_matters · expected_impact · difficulty(low/med/high) ·
+  priority_score(1-10) · timeline · implementation_steps · success_metrics
+
+Never give an instruction without the reason, the expected result, and how
+success is measured. "Post more" is banned. "Ship 1 founder-POV Reel/day for 14
+days using PAS hooks on [specific pain]; success = 3 Reels >5k reach by day 10"
+is the standard.
+"""
+
+STRATEGIC_THINKING = """
+STRATEGIC PRESSURE-TEST — before finalising any plan, challenge it:
+  - What could make this fail? (assumptions, market, algorithm, capacity)
+  - What customer behaviour are we assuming, and is it realistic?
+  - What is the tradeoff of this path vs the alternative?
+  - What are the hard constraints (time, budget, team, content supply)?
+  - If the main plan stalls by day 7, what is the backup?
+
+Surface this honestly as: risks · tradeoffs · constraints ·
+alternative_approaches · backup_plans. A plan with no stated risk is not a
+strategy — it's a wish. Consultant-grade output names what could go wrong and
+what to do about it.
+"""

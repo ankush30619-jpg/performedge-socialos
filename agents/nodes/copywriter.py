@@ -18,7 +18,10 @@ import json
 import os
 from openai import AsyncOpenAI
 from state import SocialOSState
-from skills.registry import PSYCHOLOGY_TRIGGERS, AIDA_STRUCTURE, HOOK_FORMULAS, SEVEN_SWEEPS
+from skills.registry import (
+    PSYCHOLOGY_TRIGGERS, AIDA_STRUCTURE, HOOK_FORMULAS, SEVEN_SWEEPS,
+    ANTI_AI_LANGUAGE, AD_SCRIPT_FRAMEWORK, CONVERSION_FRAMEWORKS,
+)
 
 BATCH_SIZE = 5
 
@@ -139,8 +142,11 @@ async def copywriter_node(state: SocialOSState, event_queue: asyncio.Queue) -> d
         "\n".join(voice_rules)
         + "\n\n" + PSYCHOLOGY_TRIGGERS
         + "\n\n" + AIDA_STRUCTURE
+        + "\n\n" + CONVERSION_FRAMEWORKS
         + "\n\n" + HOOK_FORMULAS
+        + "\n\n" + AD_SCRIPT_FRAMEWORK
         + "\n\n" + SEVEN_SWEEPS
+        + "\n\n" + ANTI_AI_LANGUAGE
     )
 
     # ── Build hashtag pool string ──────────────────────────────────────────
@@ -218,17 +224,26 @@ async def _write_batch(
         f"  caption_short: punchy 80-125 char mobile-first caption (with emojis, no hashtags)\n"
         f"  caption_long: storytelling 220-400 char caption with hook + value/story + CTA (with emojis)\n"
         f"  cta: STANDALONE call-to-action, 1 sentence — separate from the caption text\n"
+        f"  cta_variations: ARRAY of EXACTLY 3 distinct CTAs — different mechanisms "
+        f"(e.g. [0]=save, [1]=DM a keyword, [2]=comment/tag). Each 1 line, friction-free.\n"
         f"  seo_keywords: array of 3-5 search keywords (NOT hashtags) for caption SEO\n"
         f"  hashtags: array of 20-30 hashtags (strings with #) — mix broad/niche/brand from the pool\n"
         f"  visual_brief: 1 sentence describing the visual/creative direction\n"
         f"  audio_suggestion: object (set null for non-Reel posts) with keys:\n"
         f"    track_name (trending audio name or 'Original audio'), vibe (1-3 words), why_it_works (1 sentence)\n"
-        f"  reel_script: object (set null for non-Reel posts) with keys:\n"
+        f"  reel_script: object (set null for non-Reel posts). This is a PERFORMANCE AD,\n"
+        f"    not narration — it MUST hit all 7 beats from the AD-CREATIVE SCRIPT STANDARD\n"
+        f"    (pattern-interrupt hook → curiosity gap → emotional trigger → demonstration →\n"
+        f"    social proof → value prop → strong CTA). Keys:\n"
         f"    duration_seconds (15-45 number),\n"
-        f"    shots (array of 4-7 objects with: time_range like '0-2s', visual, on_screen_text, voiceover),\n"
-        f"    pattern_interrupt (the second 3-5 surprise moment),\n"
-        f"    retention_loop (reason viewer rewatches),\n"
+        f"    creative_direction (1 of: 'talking-head POV' | 'faceless b-roll/screen-record' | 'skit/reenactment'),\n"
+        f"    shots (array of 4-7 objects with: time_range like '0-2s', beat (which of the 7 beats), "
+        f"visual, on_screen_text, voiceover). Shot 1 = the pattern-interrupt hook (show the payoff, no greeting).\n"
+        f"    pattern_interrupt (the second 3-5 surprise moment that re-hooks drop-offs),\n"
+        f"    retention_loop (reason viewer rewatches — an end reveal that recontextualises the open),\n"
         f"    cta_overlay (final on-screen CTA text)\n"
+        f"  creative_directions: ARRAY of 2-3 DISTINCT concept angles for this post "
+        f"(each a different execution, not reworded — e.g. POV vs faceless vs skit). 1 line each.\n"
         f"  carousel_slides: ARRAY (set null for non-Carousel posts) of 5-8 slides, each with:\n"
         f"    slide_number (1-based), headline (slide title), body (1-2 sentence content),\n"
         f"    on_slide_text (overlay text), visual_note (what the visual should be).\n"
@@ -257,7 +272,10 @@ async def _write_batch(
         f"- carousel_slides MUST be null for non-Carousel posts; story_sequence MUST be null for non-Story posts\n"
         f"- audio_suggestion and reel_script MUST be null for non-Reel posts\n"
         f"- graphic_layout MUST be null for non-Graphic posts (i.e. null for Reel/AI Reel/Carousel/Story)\n"
-        f"- No AI clichés, no LinkedIn preamble, no '✨ unlock the secret ✨' fluff"
+        f"- Reel scripts MUST hit all 7 ad-creative beats and demonstrate (show), never just claim\n"
+        f"- Use concrete numbers and the audience's own words for proof — no vague superlatives\n"
+        f"- ANTI-AI: obey the BANNED words/structures list. If any line could belong to a different "
+        f"brand, rewrite it so only {name} in {niche} could have written it. No preamble, no clichés."
     )
 
     resp = await oai.chat.completions.create(
@@ -310,6 +328,8 @@ async def _write_batch(
             "caption_short":    caption_short,
             "caption_long":     caption_long,
             "cta":              gpt.get("cta") or "",
+            "cta_variations":   gpt.get("cta_variations") or ([gpt.get("cta")] if gpt.get("cta") else []),
+            "creative_directions": gpt.get("creative_directions") or [],
             "seo_keywords":     gpt.get("seo_keywords") or [],
             "audio_suggestion": gpt.get("audio_suggestion") if is_reel else None,
             "carousel_slides":  gpt.get("carousel_slides") if is_carousel else None,
@@ -344,6 +364,8 @@ def _fallback_copy(posts: list, brand: dict) -> list:
             "caption_short":    cap[:120],
             "caption_long":     cap,
             "cta":              cta_style or "Save this if it helped you!",
+            "cta_variations":   [cta_style or "Save this if it helped you!"],
+            "creative_directions": [],
             "seo_keywords":     [],
             "audio_suggestion": None,
             "carousel_slides":  None,

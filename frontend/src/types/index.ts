@@ -179,6 +179,7 @@ export interface StoryFrame {
 
 export interface ReelShot {
   time_range?: string;
+  beat?: string;
   visual?: string;
   on_screen_text?: string;
   voiceover?: string;
@@ -186,6 +187,7 @@ export interface ReelShot {
 
 export interface ReelScript {
   duration_seconds?: number;
+  creative_direction?: string;
   shots?: ReelShot[];
   pattern_interrupt?: string;
   retention_loop?: string;
@@ -213,6 +215,8 @@ export interface PostBrief {
   caption_short?: string;
   caption_long?: string;
   cta?: string;
+  cta_variations?: string[];
+  creative_directions?: string[];
   seo_keywords?: string[];
   audio_suggestion?: AudioSuggestion | null;
   carousel_slides?: CarouselSlide[] | null;

@@ -18,6 +18,10 @@ from openai import AsyncOpenAI
 from state import SocialOSState
 from nodes.research_agent import research_agent_node
 from nodes.competitor_tracker import competitor_tracker_node
+from skills.registry import (
+    GROWTH_ROADMAP_FRAMEWORK, STRATEGIC_THINKING,
+    BUYER_STAGES, ANTI_AI_LANGUAGE,
+)
 
 # Lazy OpenAI client — initialized on first use to ensure .env is loaded
 _oai = None
@@ -437,6 +441,10 @@ async def _generate_strategy(brand, brand_knowledge, analyst_report, research_da
                             )
                             if feasibility else ""
                         )
+                        + f"\n\n{GROWTH_ROADMAP_FRAMEWORK}"
+                        + f"\n{STRATEGIC_THINKING}"
+                        + f"\n{BUYER_STAGES}"
+                        + f"\n{ANTI_AI_LANGUAGE}"
                         + f"\nBrand context:\n{context_block[:800] if context_block else ''}"
                     ),
                 },
@@ -492,8 +500,11 @@ async def _generate_strategy(brand, brand_knowledge, analyst_report, research_da
                         + f"content_mix: object — Reel/Carousel/Graphic/Story/AI Reel as percentages summing to 100 "
                         + f"(weight towards best_content_type: {ig_audit.get('best_content_type','Reel')})\n"
                         + f"monthly_themes: list of 3 specific monthly theme ideas tied to {niche} seasons/trends\n"
-                        + f"growth_tactics: list of 6 SPECIFIC, actionable tactics to reach +{gap or 100} followers — "
-                        + f"each tactic must reference {name}'s specific niche and audience\n"
+                        + f"growth_tactics: list of 6 SPECIFIC, actionable tactics to reach +{gap or 100} followers. "
+                        + f"Each must name the audience segment, the format, the angle, and the repurposing path — "
+                        + f"e.g. 'Ship a 14-day founder-POV Reel series on [specific {niche} pain] using PAS hooks, "
+                        + f"repurpose each into a carousel + 3 Stories + a WhatsApp broadcast'. Never write a tactic "
+                        + f"that could apply to any brand (no 'post consistently', no 'engage with your audience').\n"
                         + f"hashtag_strategy: string (2-3 sentences) on hashtag approach specific to {niche}\n"
                         + f"cta_templates: list of 4 CTA templates that match {name}'s voice and {cta_style or tone}\n"
                         + f"what_works: list of 4 specific, data-backed insights about what content is performing well\n"
@@ -536,6 +547,21 @@ async def _generate_strategy(brand, brand_knowledge, analyst_report, research_da
                             f"week_by_week_path (list of strings like 'Week 1: focus on Reels, target +{max(1, int((feasibility or {{}}).get('required_weekly_growth', 10))) if feasibility else 10} followers'), "
                         )
                         + f"non_negotiable_actions (list of 3-5 must-do actions), risk_mitigation (list of 2-3 actions)\n"
+                        + f"\n=== CONSULTANT-GRADE DEPTH (required — make these specific to {name}/{niche}) ===\n"
+                        + f"priority_actions: list of 5 objects (the 5 highest-leverage moves), each with: "
+                        + f"action (specific, niche-referenced — NOT 'post more'), why_it_matters (1 sentence), "
+                        + f"expected_impact (concrete, e.g. '+X reach/week' or 'lifts save-rate'), "
+                        + f"difficulty ('low'|'medium'|'high'), priority_score (integer 1-10), "
+                        + f"timeline (e.g. 'Days 1-7'), implementation_steps (list of 2-4 concrete steps), "
+                        + f"success_metric (1 measurable signal). Order by priority_score descending.\n"
+                        + f"roadmap: object with four keys — quick_wins (1-7 days), short_term (30 days), "
+                        + f"mid_term (90 days), long_term (6-12 months). Each is a list of 2-3 objects with: "
+                        + f"action, owner (e.g. 'Founder', 'Editor', 'Social lead'), resources_required, "
+                        + f"expected_result, kpi, priority ('P0'|'P1'|'P2'). Sequence them so momentum compounds.\n"
+                        + f"strategic_analysis: object with risks (list of 3 specific failure modes for {name}), "
+                        + f"tradeoffs (list of 2-3), constraints (list of 2-3 real limits — time/team/content supply), "
+                        + f"alternative_approaches (list of 2 different paths to the same goal), "
+                        + f"backup_plans (list of 2 — what to do if the main plan stalls by day 7). Be honest, not rosy.\n"
                         + (
                             f"day_by_day_plan: list of {days_ahead} objects (one per day), each with day (int), "
                             f"content_task (specific post idea for {name}), growth_task (specific growth action), "
@@ -549,7 +575,7 @@ async def _generate_strategy(brand, brand_knowledge, analyst_report, research_da
             ],
             response_format={"type": "json_object"},
             temperature=0.5,
-            max_tokens=4500,
+            max_tokens=7000,
         )
         strategy_out = json.loads(resp.choices[0].message.content)
         # Ensure KPI targets from analyst flow through to the PPT layer
@@ -979,20 +1005,44 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         bar(s, 0, 0, Inches(10), Inches(0.06), brand_color)
         txt(s, "10  ·  PRIORITY RECOMMENDATIONS", Inches(0.4), Inches(0.18), Inches(9), Inches(0.38), 10, color=accent, bold=True)
         txt(s, "Specific next steps, in priority order.", Inches(0.4), Inches(0.55), Inches(9), Inches(0.5), 20, bold=True)
-        recs = strategy.get("growth_tactics") or [
-            "Increase posting frequency to 5-6 feed posts/week + daily stories",
-            "Lead with Reels — highest reach format for this niche",
-            "Launch a UGC/community challenge to build organic reach",
-            "Use strong hooks in the first 1-2 seconds of every Reel",
-            f"Post at peak times: {'  ·  '.join(str(t) for t in (strategy.get('best_times') or ['9AM','12PM','6PM'])[:3])}",
-            "Engage actively in comments for 30 minutes after each post",
-        ]
-        for i, rec in enumerate(recs[:6]):
-            y = Inches(1.15 + i * 0.68)
-            bar(s, Inches(0.4), y, Inches(9.2), Inches(0.58), mid_dark)
-            bar(s, Inches(0.4), y, Inches(0.06), Inches(0.58), brand_color)
-            txt(s, str(i+1), Inches(0.56), y+Inches(0.07), Inches(0.38), Inches(0.4), 14, bold=True, color=brand_color)
-            txt(s, str(rec)[:130], Inches(0.96), y+Inches(0.1), Inches(8.5), Inches(0.4), 11, color=light)
+        # Prefer the consultant-grade structured actions (ordered, with impact /
+        # difficulty / timeline). Fall back to plain tactic strings, then defaults.
+        priority_actions = strategy.get("priority_actions") or []
+        diff_colors = {"low": green, "medium": RGBColor(0xF5,0x9E,0x0B), "high": red}
+        if isinstance(priority_actions, list) and priority_actions and isinstance(priority_actions[0], dict):
+            for i, pa in enumerate(priority_actions[:6]):
+                y = Inches(1.12 + i * 0.69)
+                bar(s, Inches(0.4), y, Inches(9.2), Inches(0.6), mid_dark)
+                bar(s, Inches(0.4), y, Inches(0.06), Inches(0.6), brand_color)
+                txt(s, str(i+1), Inches(0.56), y+Inches(0.13), Inches(0.38), Inches(0.4), 14, bold=True, color=brand_color)
+                action = str(pa.get("action", ""))[:108]
+                txt(s, action, Inches(0.96), y+Inches(0.05), Inches(8.5), Inches(0.32), 11, color=white)
+                pscore = pa.get("priority_score")
+                diff   = str(pa.get("difficulty", "")).lower()
+                tline  = str(pa.get("timeline", ""))
+                impact = str(pa.get("expected_impact", ""))[:60]
+                meta_bits = []
+                if pscore not in (None, ""): meta_bits.append(f"P{pscore}")
+                if diff:   meta_bits.append(diff.capitalize())
+                if tline:  meta_bits.append(tline)
+                if impact: meta_bits.append(f"→ {impact}")
+                txt(s, "  ·  ".join(meta_bits)[:120], Inches(0.96), y+Inches(0.36), Inches(8.5), Inches(0.22), 8,
+                    color=diff_colors.get(diff, grey))
+        else:
+            recs = strategy.get("growth_tactics") or [
+                "Increase posting frequency to 5-6 feed posts/week + daily stories",
+                "Lead with Reels — highest reach format for this niche",
+                "Launch a UGC/community challenge to build organic reach",
+                "Use strong hooks in the first 1-2 seconds of every Reel",
+                f"Post at peak times: {'  ·  '.join(str(t) for t in (strategy.get('best_times') or ['9AM','12PM','6PM'])[:3])}",
+                "Engage actively in comments for 30 minutes after each post",
+            ]
+            for i, rec in enumerate(recs[:6]):
+                y = Inches(1.15 + i * 0.68)
+                bar(s, Inches(0.4), y, Inches(9.2), Inches(0.58), mid_dark)
+                bar(s, Inches(0.4), y, Inches(0.06), Inches(0.58), brand_color)
+                txt(s, str(i+1), Inches(0.56), y+Inches(0.07), Inches(0.38), Inches(0.4), 14, bold=True, color=brand_color)
+                txt(s, str(rec)[:130], Inches(0.96), y+Inches(0.1), Inches(8.5), Inches(0.4), 11, color=light)
         footer(s, 11)
 
         # ── Slide 12: Outro ──
