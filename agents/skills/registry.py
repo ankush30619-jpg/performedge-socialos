@@ -290,6 +290,66 @@ days using PAS hooks on [specific pain]; success = 3 Reels >5k reach by day 10"
 is the standard.
 """
 
+# ── Hook Rotation Engine (anti-repetition, scroll-stop) ──────────────────────
+
+HOOK_ROTATION_ENGINE = """
+HOOK ROTATION ENGINE — the hook is the most important part. Each post gets an
+ASSIGNED hook category (given per post below). Write the primary hook in that
+category. The 3 hook_variations must be 3 DIFFERENT categories — never 3 of the
+same shape.
+
+The 20 categories (write a genuinely different opening for each):
+Curiosity · Contrarian · Shock · Mistake · Story · Relatable · Problem · FOMO ·
+Confession · Comparison · Myth-busting · Secret-revealing · Before/After ·
+Question · Challenge · Observation · Customer-review · Social-proof · Emotional ·
+Unexpected-fact.
+
+HARD RULES:
+- Never reuse an opening sentence structure across posts.
+- Never slightly reword a previous hook — write from scratch.
+- No two posts may open with the same category (rotation is enforced for you).
+- A hook that could be pasted onto any other brand's post is REJECTED.
+
+QUALITY FILTER — discard a hook if ANY is true: sounds AI-written, predictable,
+boring, corporate, or a structure already used. Keep only hooks that create
+curiosity, trigger emotion, and would actually stop a thumb mid-scroll.
+
+CTA ROTATION — rotate CTA mechanism across posts; never repeat the same CTA type
+back-to-back: Curiosity · Urgency · Direct · Community · Soft · Comment · Save ·
+Share · DM.
+
+BANNED generic openers (English AND Hinglish) — never output these or close cousins:
+"Aaj main aapko batane wala hu", "Kya aap jante hain", "Yeh product bahut accha hai",
+"Agar aap bhi…", "Let me tell you", "Did you know", "In this post", "Here's why you
+should", and any line that reads like a corporate announcement.
+"""
+
+# ── Hinglish Voice (Roman-script Hindi + English) ────────────────────────────
+
+HINGLISH_VOICE = """
+HINGLISH MODE — write hooks, captions, voiceovers and CTAs in natural Hinglish
+(Hindi + English in Roman script), the way a real creator talks to camera. NOT
+pure Hindi, NOT pure English, NOT Devanagari.
+
+Sound like a person, not a brand:
+GOOD: "Bhai sach bataun, agar tum abhi bhi ye galti kar rahe ho toh paise waste kar rahe ho."
+GOOD: "Ye dekh ke mujhe bhi yakeen nahi hua tha."
+BAD : "This product is designed with advanced features." (too corporate / pure English)
+BAD : full Devanagari or formal Hindi.
+
+Category openers (Hinglish flavour — reinvent each time, don't copy verbatim):
+- Curiosity:   "Bhai ye dekh ke pehle mujhe laga fake hai…"
+- Contrarian:  "Sab log ye kar rahe hain… aur isi wajah se fail ho rahe hain."
+- Story:       "Kal mere saath kuch aisa hua jo socha bhi nahi tha…"
+- Mistake:     "Agar tum ye ek galti kar rahe ho, result kabhi nahi aayega."
+- Observation: "Maine ek cheez notice ki hai jo koi nahi bolta…"
+- Relatable:   "Kabhi aisa hua hai ki…"
+- Shock:       "Ye result sirf 7 din mein aaya."
+
+Tone: natural, conversational, modern, Reels-native. Short punchy lines.
+Hashtags and proper nouns stay as-is; the spoken copy is Hinglish.
+"""
+
 STRATEGIC_THINKING = """
 STRATEGIC PRESSURE-TEST — before finalising any plan, challenge it:
   - What could make this fail? (assumptions, market, algorithm, capacity)

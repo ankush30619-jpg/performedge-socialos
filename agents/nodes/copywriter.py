@@ -21,9 +21,28 @@ from state import SocialOSState
 from skills.registry import (
     PSYCHOLOGY_TRIGGERS, AIDA_STRUCTURE, HOOK_FORMULAS, SEVEN_SWEEPS,
     ANTI_AI_LANGUAGE, AD_SCRIPT_FRAMEWORK, CONVERSION_FRAMEWORKS,
+    HOOK_ROTATION_ENGINE, HINGLISH_VOICE,
 )
 
 BATCH_SIZE = 5
+
+# Enforced rotation — assigned deterministically across the whole calendar so no
+# two consecutive posts share a hook category or a CTA mechanism.
+HOOK_CATEGORIES = [
+    "Curiosity", "Contrarian", "Shock", "Mistake", "Story", "Relatable",
+    "Problem", "FOMO", "Confession", "Comparison", "Myth-busting",
+    "Secret-revealing", "Before/After", "Question", "Challenge", "Observation",
+    "Customer-review", "Social-proof", "Emotional", "Unexpected-fact",
+]
+CTA_TYPES = [
+    "Curiosity", "Urgency", "Direct", "Community", "Soft",
+    "Comment", "Save", "Share", "DM",
+]
+
+
+def _is_hinglish(language: str) -> bool:
+    l = (language or "").lower()
+    return "hinglish" in l or "hindi" in l or "roman urdu" in l
 
 # Lazy singleton
 _oai = None
@@ -96,9 +115,18 @@ async def copywriter_node(state: SocialOSState, event_queue: asyncio.Queue) -> d
     strategy_ctas = growth_strategy.get("cta_templates", [])
 
     # ── Build the brand voice system prompt ────────────────────────────────
+    hinglish = _is_hinglish(language)
+
     voice_rules = []
     voice_rules.append(f"You are the head copywriter for {name}, a {niche} brand.")
-    voice_rules.append(f"Language: {language} | Tone: {tone}")
+    if hinglish:
+        voice_rules.append(
+            f"Language: HINGLISH (Hindi + English in Roman script) | Tone: {tone}. "
+            f"Every hook, caption, voiceover and CTA must be natural spoken Hinglish — "
+            f"never pure Hindi, never pure English, never Devanagari."
+        )
+    else:
+        voice_rules.append(f"Language: {language} | Tone: {tone}")
     if voice_style:     voice_rules.append(f"Voice style: {voice_style}")
     if positioning:     voice_rules.append(f"Brand positioning: {positioning}")
     if differentiation: voice_rules.append(f"Unique differentiator: {differentiation}")
@@ -144,9 +172,11 @@ async def copywriter_node(state: SocialOSState, event_queue: asyncio.Queue) -> d
         + "\n\n" + AIDA_STRUCTURE
         + "\n\n" + CONVERSION_FRAMEWORKS
         + "\n\n" + HOOK_FORMULAS
+        + "\n\n" + HOOK_ROTATION_ENGINE
         + "\n\n" + AD_SCRIPT_FRAMEWORK
         + "\n\n" + SEVEN_SWEEPS
         + "\n\n" + ANTI_AI_LANGUAGE
+        + ("\n\n" + HINGLISH_VOICE if hinglish else "")
     )
 
     # ── Build hashtag pool string ──────────────────────────────────────────
@@ -161,9 +191,21 @@ async def copywriter_node(state: SocialOSState, event_queue: asyncio.Queue) -> d
     elif flat_hashtags:
         hashtag_pool_text = f"Available hashtags: {' '.join(flat_hashtags[:20])}"
 
+    # ── Assign rotating hook category + CTA type to every post up-front ──────
+    # Deterministic across the WHOLE calendar (not per-batch) so no two
+    # consecutive posts share a hook category or CTA mechanism. Offset the CTA
+    # cycle so hook/CTA pairings vary too.
+    for gi, p in enumerate(calendar):
+        p["_hook_category"] = HOOK_CATEGORIES[gi % len(HOOK_CATEGORIES)]
+        p["_cta_type"]      = CTA_TYPES[(gi + 3) % len(CTA_TYPES)]
+
     # ── Process in batches ─────────────────────────────────────────────────
     posts_with_copy = []
     batches = [calendar[i:i+BATCH_SIZE] for i in range(0, len(calendar), BATCH_SIZE)]
+
+    # Cross-batch hook memory — the running list of hooks already written, fed
+    # into each batch as a do-not-repeat list (a practical hook-memory rule).
+    hook_memory: list[str] = []
 
     for batch_idx, batch in enumerate(batches):
         start = batch_idx * BATCH_SIZE + 1
@@ -176,9 +218,16 @@ async def copywriter_node(state: SocialOSState, event_queue: asyncio.Queue) -> d
 
         try:
             batch_results = await _write_batch(
-                batch, system_prompt, hashtag_pool_text, name, niche, tone
+                batch, system_prompt, hashtag_pool_text, name, niche, tone,
+                hinglish=hinglish, hook_memory=hook_memory,
             )
             posts_with_copy.extend(batch_results)
+            # Grow the memory with the hooks this batch produced
+            for r in batch_results:
+                for hv in (r.get("hook_variations") or []):
+                    if hv:
+                        hook_memory.append(str(hv))
+            hook_memory[:] = hook_memory[-50:]  # keep last 50
         except Exception as e:
             print(f"[Copywriter] Batch {batch_idx} error: {e}")
             import traceback; traceback.print_exc()
@@ -200,32 +249,52 @@ async def copywriter_node(state: SocialOSState, event_queue: asyncio.Queue) -> d
 
 async def _write_batch(
     batch: list, system_prompt: str, hashtag_pool_text: str,
-    name: str, niche: str, tone: str
+    name: str, niche: str, tone: str,
+    hinglish: bool = False, hook_memory: list = None,
 ) -> list:
     """Write one batch of posts. Returns merged list with captions + hashtags."""
     oai = _get_oai()
+    hook_memory = hook_memory or []
 
     posts_desc = "\n".join(
         f"{i+1}. [{p['contentType']}] {p['topic']}\n"
         f"   Pillar: {p.get('pillar','')}\n"
+        f"   ASSIGNED hook category (write the primary hook in THIS category): {p.get('_hook_category','Curiosity')}\n"
+        f"   ASSIGNED CTA mechanism (use this for the main cta): {p.get('_cta_type','Direct')}\n"
         f"   Creative brief: {p.get('copy_brief', 'Write brand-aligned copy for this topic')}\n"
         f"   Visual direction: {p.get('visual_direction', '')}"
         for i, p in enumerate(batch)
     )
 
+    # Do-not-repeat memory: the hooks already written earlier in this run.
+    memory_block = ""
+    if hook_memory:
+        recent = hook_memory[-30:]
+        memory_block = (
+            "HOOKS ALREADY USED in this run — do NOT reuse their structure, opening "
+            "words, or pattern. If your draft is >30% similar to any of these, rewrite it:\n"
+            + "\n".join(f"- {h[:90]}" for h in recent)
+            + "\n\n"
+        )
+
     user_prompt = (
-        f"Write production-grade Instagram content for these {len(batch)} posts.\n\n"
+        (f"WRITE EVERYTHING IN NATURAL HINGLISH (Roman-script Hindi+English). "
+         f"Hooks, captions, voiceovers, CTAs — all Hinglish. Not pure Hindi, not pure English.\n\n"
+         if hinglish else "")
+        + memory_block
+        + f"Write production-grade Instagram content for these {len(batch)} posts.\n\n"
         f"Posts:\n{posts_desc}\n\n"
         f"{hashtag_pool_text}\n\n"
         f"Return JSON with key 'posts' — array of {len(batch)} objects, each with:\n"
         f"  index: 1-based integer\n"
-        f"  hook_variations: ARRAY of EXACTLY 3 distinct opening hooks — each a different format\n"
-        f"    (e.g. [0]=question, [1]=bold statement, [2]=contrarian/number/story). Each 1-2 lines.\n"
+        f"  hook_variations: ARRAY of EXACTLY 3 distinct opening hooks. [0] MUST be in the post's\n"
+        f"    ASSIGNED hook category; [1] and [2] must each be a DIFFERENT category from [0] and each\n"
+        f"    other. Each 1-2 lines, written from scratch — never reuse a structure from earlier posts.\n"
         f"  caption_short: punchy 80-125 char mobile-first caption (with emojis, no hashtags)\n"
         f"  caption_long: storytelling 220-400 char caption with hook + value/story + CTA (with emojis)\n"
-        f"  cta: STANDALONE call-to-action, 1 sentence — separate from the caption text\n"
-        f"  cta_variations: ARRAY of EXACTLY 3 distinct CTAs — different mechanisms "
-        f"(e.g. [0]=save, [1]=DM a keyword, [2]=comment/tag). Each 1 line, friction-free.\n"
+        f"  cta: STANDALONE call-to-action, 1 sentence — use the post's ASSIGNED CTA mechanism.\n"
+        f"  cta_variations: ARRAY of EXACTLY 3 distinct CTAs — 3 DIFFERENT mechanisms from the CTA\n"
+        f"    rotation (Curiosity/Urgency/Direct/Community/Soft/Comment/Save/Share/DM). Each 1 line.\n"
         f"  seo_keywords: array of 3-5 search keywords (NOT hashtags) for caption SEO\n"
         f"  hashtags: array of 20-30 hashtags (strings with #) — mix broad/niche/brand from the pool\n"
         f"  visual_brief: 1 sentence describing the visual/creative direction\n"
@@ -295,6 +364,8 @@ async def _write_batch(
     merged = []
     for i, post in enumerate(batch):
         gpt = results_raw[i] if i < len(results_raw) else {}
+        # Drop internal rotation hints so they never reach the DB / frontend.
+        post = {k: v for k, v in post.items() if not k.startswith("_")}
         content_type = post.get("contentType", "")
         is_reel      = content_type in ("Reel", "AI Reel")
         is_carousel  = content_type == "Carousel"
@@ -348,6 +419,7 @@ def _fallback_copy(posts: list, brand: dict) -> list:
 
     result = []
     for i, p in enumerate(posts):
+        p = {k: v for k, v in p.items() if not k.startswith("_")}
         cap = _simple_caption(p, i, name, catchphrases, cta_style)
         hook = f"Here's something important about {niche}:"
         result.append({
