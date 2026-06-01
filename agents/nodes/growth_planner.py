@@ -232,21 +232,34 @@ def _build_ig_audit(
     ig_connected = analyst_report.get("ig_connected", False)
     profile_views_30d = (analyst_report.get("profileViews30d") or
                          analyst_report.get("profile_views_30d") or 0)
+    # Benchmark / scraped fallback metrics (labeled Estimate downstream)
+    est_er     = analyst_report.get("estimated_er", 0) or 0
+    est_reach  = analyst_report.get("estimated_reach", 0) or 0
+    bm_source  = analyst_report.get("benchmark_source", "")
+    bm_conf    = analyst_report.get("benchmark_confidence", 55)
+    analyst_data_source = analyst_report.get("data_source", "none")
 
     # User-supplied current followers override takes priority
     if current_followers_override is not None and current_followers_override >= 0:
         followers = current_followers_override
 
-    # CRITICAL FIX: fall back to brand.igFollowers when live IG data is unavailable.
-    # Without this, followers=0 and every plan starts "0 → 400" which is nonsense.
+    # Fall back to brand.igFollowers when live IG data is unavailable.
     if followers == 0 and brand:
         stored = int(brand.get("igFollowers") or 0)
         if stored > 0:
             followers = stored
 
-    data_source = "live" if (ig_connected and followers > 0) else (
-        "stored" if (not ig_connected and followers > 0) else "estimate"
-    )
+    # Use benchmark ER/reach if live data is zero but benchmarks exist
+    if avg_er == 0 and est_er > 0:
+        avg_er = est_er
+    if avg_reach == 0 and est_reach > 0:
+        avg_reach = est_reach
+
+    data_source = "live" if (ig_connected and followers > 0 and len(top_posts) > 0) else (
+        "scraped"   if analyst_data_source == "scraped" and followers > 0 else (
+        "benchmark" if analyst_data_source == "benchmark" and followers > 0 else (
+        "stored"    if (not ig_connected and followers > 0) else "estimate"
+    )))
 
     # Classify posts as working / not working
     working     = []
@@ -315,6 +328,10 @@ def _build_ig_audit(
         # New: data-quality flags consumed by the PPT layer
         "has_live_metrics":  has_live_metrics,
         "goal_was_invalid":  goal_was_invalid,
+        "est_er":            est_er,
+        "est_reach":         est_reach,
+        "benchmark_source":  bm_source,
+        "benchmark_confidence": bm_conf,
         "content_type_mix": content_types,
         "working_posts":    working[:5],
         "not_working_posts": not_working[:5],
@@ -915,18 +932,43 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         else:
             mode_label = "Launch Mode  ·  No social profile connected  ·  Confidence: low  ·  Targets based on brand brief + niche research"
         txt(s, mode_label, Inches(0.4), Inches(0.95), Inches(9.2), Inches(0.28), 9, color=grey, italic=True)
-        # Spec §data_validation_system: 'Data Unavailable' beats a misleading '0'.
-        posts_n     = ig_audit.get("posts_analysed", 0)
-        er_v        = f"{avg_er}%"                if has_live and avg_er > 0    else "Data Unavailable"
-        reach_v     = f"{avg_reach:,}"            if has_live and avg_reach > 0 else "Data Unavailable"
+        # Data display with honest confidence tiers:
+        # live → exact number  |  benchmark/scraped → "~X% (Est.)"  |  none → "Unable to Retrieve"
+        posts_n    = ig_audit.get("posts_analysed", 0)
+        est_er     = ig_audit.get("est_er", 0)
+        est_reach  = ig_audit.get("est_reach", 0)
+        bm_src     = ig_audit.get("benchmark_source", "")
+        bm_conf    = ig_audit.get("benchmark_confidence", 55)
+        ds         = ig_audit.get("data_source", "stored")
+
+        if has_live and avg_er > 0:
+            er_v    = f"{avg_er}%"
+            er_col  = green
+        elif est_er > 0:
+            er_v    = f"~{est_er}% (Est.)"
+            er_col  = amber
+        else:
+            er_v    = "Unable to Retrieve"
+            er_col  = grey
+
+        if has_live and avg_reach > 0:
+            reach_v   = f"{avg_reach:,}"
+            reach_col = accent
+        elif est_reach > 0:
+            reach_v   = f"~{est_reach:,} (Est.)"
+            reach_col = amber
+        else:
+            reach_v   = "Unable to Retrieve"
+            reach_col = grey
+
         best_fmt_v  = ig_audit.get("best_content_type") or ("—" if posts_n == 0 else "Reel")
-        posts_v     = f"{posts_n}"                if posts_n > 0                else "Data Unavailable"
+        posts_v     = f"{posts_n}" if posts_n > 0 else ("—" if ds in ("benchmark","scraped") else "Unable to Retrieve")
         snap_stats = [
             (f"{followers:,}", "Followers",       brand_color),
-            (er_v,              "Eng. Rate",      green if er_v != "Data Unavailable" else grey),
-            (reach_v,           "Avg Reach",      accent if reach_v != "Data Unavailable" else grey),
-            (best_fmt_v,        "Best Format",    amber if best_fmt_v not in ("Data Unavailable","—") else grey),
-            (posts_v,           "Posts Analysed", white if posts_v != "Data Unavailable" else grey),
+            (er_v,              "Eng. Rate",      er_col),
+            (reach_v,           "Avg Reach",      reach_col),
+            (best_fmt_v,        "Best Format",    amber if best_fmt_v not in ("Unable to Retrieve","—") else grey),
+            (posts_v,           "Posts Analysed", white if posts_n > 0 else grey),
         ]
         for i, (val, lbl, col) in enumerate(snap_stats):
             x = Inches(0.3 + i * 1.9)
@@ -943,6 +985,10 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
             col_h = hex_to_rgb(ct_hex.get(ct, "6C3CE1"))
             txt(s, ct, x, Inches(3.6), Inches(1.7), Inches(0.3), 9, bold=True, color=col_h)
             txt(s, f"{pct}%", x, Inches(3.92), Inches(1.7), Inches(0.5), 18, bold=True, color=col_h)
+        # Show benchmark source when metrics are estimates
+        if not has_live and (est_er > 0 or est_reach > 0) and bm_src:
+            conf_label = f"Confidence: {bm_conf}%  ·  Source: {bm_src[:80]}"
+            txt(s, conf_label, Inches(0.4), Inches(4.9), Inches(9.2), Inches(0.22), 7, color=RGBColor(0x6B,0x72,0x80), italic=True)
         footer(s, 4)
 
         # ── Slide 5: Content Performance — What's Working ──
@@ -1074,9 +1120,16 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         # ── Slide 9: Competitor Intelligence ──
         s = prs.slides.add_slide(blank); bg(s, dark)
         slide_header(s, "08  ·  COMPETITOR INTELLIGENCE", "Who you're up against — and where you win.")
+        # Show actual competitor names at the top
+        comps_found = cd.get("competitors_found") or []
+        if comps_found:
+            comp_names_str = "  ·  ".join(str(c)[:30] for c in comps_found[:6])
+            bar(s, Inches(0.3), Inches(1.05), Inches(9.4), Inches(0.42), mid_dark)
+            txt(s, "COMPETITORS IDENTIFIED:", Inches(0.45), Inches(1.1), Inches(2.2), Inches(0.3), 8, color=accent, bold=True)
+            txt(s, comp_names_str, Inches(2.8), Inches(1.1), Inches(6.8), Inches(0.3), 9, color=light)
         diff_strat = cd.get("differentiation_strategy") or ""
         if diff_strat:
-            txt(s, f'"{str(diff_strat)[:200]}"', Inches(0.4), Inches(1.05), Inches(9.2), Inches(0.4), 10, color=grey, italic=True)
+            txt(s, f'"{str(diff_strat)[:180]}"', Inches(0.4), Inches(1.58 if comps_found else 1.08), Inches(9.2), Inches(0.38), 9, color=grey, italic=True)
         comp_adv    = strategy.get("competitor_advantage") or []
         comp_gaps9  = cd.get("content_gaps") or cd.get("gaps_to_fill") or []
         formats_own = cd.get("content_formats_to_own") or []
@@ -1085,14 +1138,14 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
             ("COMPETITOR GAPS TO FILL",green,       comp_gaps9[:3] or ["Underserved audience","Missing educational","No UGC strategy"]),
             ("FORMATS WE WILL OWN",    accent,      formats_own[:3] or ["Educational Reels","BTS Stories","Community Carousels"]),
         ]
-        y9 = Inches(1.55) if diff_strat else Inches(1.2)
+        y9 = Inches(2.1) if (comps_found or diff_strat) else Inches(1.2)
         for i, (title, col, items) in enumerate(col9_items):
             x = Inches(0.3 + i * 3.2)
-            bar(s, x, y9, Inches(3.0), Inches(3.6), mid_dark)
+            bar(s, x, y9, Inches(3.0), Inches(3.0), mid_dark)
             bar(s, x, y9, Inches(3.0), Inches(0.05), col)
             txt(s, title, x+Inches(0.12), y9+Inches(0.1), Inches(2.8), Inches(0.32), 8, color=col, bold=True)
             for j, item in enumerate(items[:4]):
-                txt(s, f"→ {str(item)[:56]}", x+Inches(0.12), y9+Inches(0.5+j*0.62), Inches(2.8), Inches(0.55), 10, color=light)
+                txt(s, f"→ {str(item)[:56]}", x+Inches(0.12), y9+Inches(0.5+j*0.58), Inches(2.8), Inches(0.5), 10, color=light)
         footer(s, 9)
 
         # ── Slide 10: Competitor Gap Analysis ──
@@ -1126,12 +1179,15 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         req_day = feas.get("required_daily_growth", 0)
         est_wk  = feas.get("est_current_weekly_growth", 5)
         accel   = feas.get("acceleration_needed", 1.0)
+        _er_disp    = f"{avg_er}%" if has_live else (f"~{ig_audit.get('est_er',0)}% (Est.)" if ig_audit.get('est_er',0) else "—")
+        _reach_disp = f"{avg_reach:,}" if has_live else (f"~{ig_audit.get('est_reach',0):,} (Est.)" if ig_audit.get('est_reach',0) else "—")
+        _req_reach  = f"{int(ig_audit.get('est_reach',0) * 1.5):,}+" if ig_audit.get('est_reach',0) and not has_live else (f"{int(avg_reach * 1.5):,}+" if avg_reach else "See strategy")
         rows11  = [
             ("Followers",      f"{followers:,}",    f"{goal:,}",        f"+{gap:,}",            brand_color),
             ("Weekly Growth",  f"{est_wk}/wk",       f"{req_wk}/wk",     f"{accel}x needed",     amber),
             ("Daily Growth",   "—",                  f"{req_day}/day",    "—",                    accent),
-            ("Engagement Rate",f"{avg_er}%",          "3-5%",             "Industry benchmark",   green),
-            ("Avg Reach",      f"{avg_reach:,}",      f"{int(avg_reach*1.5):,}" if avg_reach else "—", "+50% target", grey),
+            ("Engagement Rate",_er_disp,              "3-5%",             "Industry benchmark",   green),
+            ("Avg Reach",      _reach_disp,           _req_reach,         "+50% target",          grey),
         ]
         bar(s, Inches(0.3), Inches(1.2), Inches(9.4), Inches(0.38), RGBColor(0x1A,0x10,0x35))
         for ci, lbl in enumerate(["METRIC","CURRENT","REQUIRED","GAP"]):
@@ -1246,20 +1302,31 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
                             "priority": "P1", "difficulty": str(r.get("difficulty","medium")),
                             "timeline": str(r.get("timeline",""))} for r in pa[:5]]
         diff_col_map = {"low": green, "medium": amber, "high": red}
-        for i, rec in enumerate(struct_recs[:6]):
-            y = Inches(1.1 + i * 0.72)
-            bar(s, Inches(0.4), y, Inches(9.2), Inches(0.63), mid_dark)
-            bar(s, Inches(0.4), y, Inches(0.05), Inches(0.63), brand_color)
-            title_r  = str(rec.get("title",""))[:92]
+        for i, rec in enumerate(struct_recs[:5]):
+            y = Inches(1.08 + i * 0.85)
+            bar(s, Inches(0.4), y, Inches(9.2), Inches(0.76), mid_dark)
+            bar(s, Inches(0.4), y, Inches(0.05), Inches(0.76), brand_color)
+            title_r  = str(rec.get("title",""))[:105]
             evidence = rec.get("evidence") or []
-            evid_str = " · ".join(str(e)[:42] for e in evidence[:2]) if evidence else ""
             diff     = str(rec.get("difficulty","")).lower()
             tline    = str(rec.get("timeline",""))
-            impact   = str(rec.get("expected_impact",""))[:52]
-            txt(s, title_r, Inches(0.55), y+Inches(0.05), Inches(7.5), Inches(0.28), 11, bold=True, color=white)
-            meta = "  ·  ".join(m for m in [evid_str, f"→ {impact}" if impact else "", tline] if m)
-            txt(s, meta[:130], Inches(0.55), y+Inches(0.35), Inches(8.8), Inches(0.22), 8,
-                color=diff_col_map.get(diff, grey), italic=True)
+            impact   = str(rec.get("expected_impact",""))[:60]
+            priority = str(rec.get("priority",""))
+            # Line 1: title
+            txt(s, title_r, Inches(0.55), y+Inches(0.06), Inches(8.4), Inches(0.28), 11, bold=True, color=white)
+            # Line 2: evidence (primary)
+            evid1 = str(evidence[0])[:100] if evidence else ""
+            if evid1:
+                txt(s, f"Evidence: {evid1}", Inches(0.55), y+Inches(0.35), Inches(8.6), Inches(0.2), 8, color=light, italic=True)
+            # Line 3: impact + timeline + priority + difficulty
+            meta_parts = []
+            if impact: meta_parts.append(f"→ {impact}")
+            if tline:  meta_parts.append(tline)
+            if priority: meta_parts.append(priority)
+            if diff:   meta_parts.append(diff.capitalize())
+            meta = "  ·  ".join(meta_parts)[:120]
+            txt(s, meta, Inches(0.55), y+Inches(0.55), Inches(8.6), Inches(0.18), 8,
+                color=diff_col_map.get(diff, grey))
         footer(s, 15)
 
         # ── Slide 16: Content Pillar Breakdown ──
@@ -1552,6 +1619,14 @@ def _validate_strategy(strategy: dict, ig_audit: dict, feasibility: dict = None,
 def _fallback_strategy(brand: dict, days_ahead: int, ig_audit: dict = None) -> dict:
     niche   = brand.get("niche", "your niche")
     name    = brand.get("name", "your brand")
+    # Shorten niche for use in tactic strings — long niche values like
+    # "Air cooler distribution & cooling solutions" produce broken-looking text.
+    # Use the first 3 meaningful words, or the full niche if short.
+    niche_words = niche.split()
+    niche_short = " ".join(niche_words[:3]) if len(niche_words) > 3 else niche
+    # Use brand name for brand-specific references
+    brand_ref   = name if name and name != "your brand" else niche_short
+
     _followers = (ig_audit or {}).get("followers", 0)
     _goal      = (ig_audit or {}).get("goal_followers", 500)
     _gap       = max(_goal - _followers, 0)
@@ -1565,17 +1640,17 @@ def _fallback_strategy(brand: dict, days_ahead: int, ig_audit: dict = None) -> d
         "best_times": ["9:00 AM", "12:30 PM", "6:00 PM"],
         "content_mix": {"Reel": 40, "Carousel": 30, "Graphic": 15, "Story": 10, "AI Reel": 5},
         "monthly_themes": [
-            f"{name} Brand Story Month",
-            f"{niche} Client Spotlight",
-            f"{niche} Industry Insights",
+            f"{brand_ref} Brand Story Month",
+            f"{niche_short} Client Spotlight",
+            f"{niche_short} Industry Insights",
         ],
         "growth_tactics": [
-            f"Post {niche}-specific Reels daily for first 2 weeks",
-            f"Engage with 15 accounts in {niche} community daily",
-            "Use 15-20 targeted hashtags per post (mix broad + niche)",
-            "Respond to all comments within 1 hour to boost distribution",
-            f"Collaborate with micro-influencers in {niche} space",
-            "Pin best-performing post as profile highlight",
+            f"Ship 14-day Reel series on {brand.get('audiencePainPoints','common pain points')[:45]} using PAS hooks — repurpose each into a Carousel + 3 Stories",
+            f"Engage with 15 accounts in the {niche_short} community daily — comment with genuine insight, not emojis",
+            "Use 15-20 targeted hashtags per post (mix broad 500K+ + niche 10K-200K)",
+            "Respond to all comments within 1 hour of posting to boost algorithmic distribution",
+            f"Partner with 1-2 micro-influencers in the {niche_short} space for a swap collab",
+            "Pin the best-performing post as a profile highlight and update it every 30 days",
         ],
         "hashtag_strategy": f"Use a mix of broad {niche} hashtags (500K-2M posts) and niche-specific ones (10K-200K posts) to balance reach and community discovery.",
         "cta_templates": [

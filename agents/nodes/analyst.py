@@ -6,7 +6,9 @@ Falls back to GPT strategic baseline if no IG credentials.
 import asyncio
 import json
 import os
+import re
 import aiohttp
+import httpx
 from openai import AsyncOpenAI
 from state import SocialOSState
 
@@ -37,6 +39,8 @@ async def analyst_node(state: SocialOSState, event_queue: asyncio.Queue) -> dict
     tone     = brand.get("tone", "")
     ig_account_id   = brand.get("igAccountId")
     ig_access_token = brand.get("igAccessToken")  # decrypted by brand_manager
+    ig_username     = brand.get("igUsername") or brand.get("instagramUrl", "")
+    stored_followers= int(brand.get("igFollowers") or 0)
 
     await event_queue.put({
         "type": "agent_progress",
@@ -44,12 +48,12 @@ async def analyst_node(state: SocialOSState, event_queue: asyncio.Queue) -> dict
         "message": "Analysing brand profile…",
     })
 
-    # ── Real Meta Graph API path ─────────────────────────────────────────────
+    # ── Attempt 1: Live Meta Graph API ───────────────────────────────────────
     if ig_account_id and ig_access_token:
         await event_queue.put({
             "type": "agent_progress",
             "agentKey": "analyst",
-            "message": "Fetching live Instagram insights from Meta Graph API…",
+            "message": "Attempt 1: Fetching live Instagram insights from Meta Graph API…",
         })
         try:
             ig_data = await _fetch_meta_insights(ig_account_id, ig_access_token)
@@ -59,25 +63,141 @@ async def analyst_node(state: SocialOSState, event_queue: asyncio.Queue) -> dict
                 "_message": f"Live Instagram analytics fetched for @{ig_data.get('username', name)}",
             }
         except Exception as e:
-            print(f"[Analyst] Meta API error: {e} — falling back to GPT baseline")
+            print(f"[Analyst] Meta API error: {e} — trying public scrape next")
             await event_queue.put({
                 "type": "agent_progress",
                 "agentKey": "analyst",
-                "message": f"Meta API error ({str(e)[:60]}) — building GPT baseline instead…",
+                "message": f"Meta API error — trying public profile scrape (Attempt 2)…",
             })
 
-    # ── GPT strategic baseline path (no IG or API error) ────────────────────
+    # ── Attempt 2: Tavily public profile scrape ──────────────────────────────
+    # Use the brand's IG username (or stored follower count) to try getting
+    # publicly available profile data before falling back to pure benchmarks.
+    username_clean = ig_username.replace("https://instagram.com/", "").replace("https://www.instagram.com/", "").strip("/").strip()
+    scraped = {}
+    if username_clean:
+        await event_queue.put({
+            "type": "agent_progress",
+            "agentKey": "analyst",
+            "message": f"Attempt 2: Scraping public Instagram profile @{username_clean}…",
+        })
+        scraped = await _tavily_scrape_instagram(username_clean, niche)
+
+    # ── Attempt 3 & 4: Industry benchmarks from stored data ─────────────────
+    # When we have a stored follower count but no live API, we compute honest
+    # industry benchmarks. These are clearly labeled Estimate — never claimed
+    # as measured. This eliminates "Data Unavailable" while being fully honest.
+    followers_for_benchmark = (
+        scraped.get("follower_count") or stored_followers or 0
+    )
+    if followers_for_benchmark > 0 or username_clean:
+        await event_queue.put({
+            "type": "agent_progress",
+            "agentKey": "analyst",
+            "message": "Attempt 3-4: Applying niche industry benchmarks + competitor data…",
+        })
+        benchmarks = _niche_benchmarks(niche, followers_for_benchmark)
+        report = await _generate_baseline_report(
+            name, niche, audience, tone, brand_knowledge,
+            stored_followers=followers_for_benchmark,
+            benchmarks=benchmarks,
+            scraped_data=scraped,
+        )
+        return {
+            "analyst_report": report,
+            "_message": (
+                f"Profile intelligence ready for {name} — "
+                f"{'scraped public data + ' if scraped else ''}"
+                f"niche benchmarks applied (connect IG for live analytics)"
+            ),
+        }
+
+    # ── Pure GPT strategic baseline (no IG info at all) ─────────────────────
     await event_queue.put({
         "type": "agent_progress",
         "agentKey": "analyst",
-        "message": "No Instagram connected — building strategic brand-led baseline (connect IG for live metrics)…",
+        "message": "Building strategic brand-led baseline (no IG info found — connect IG for live metrics)…",
     })
-
     report = await _generate_baseline_report(name, niche, audience, tone, brand_knowledge)
-
     return {
         "analyst_report": report,
         "_message": f"Strategic baseline ready for {name} — connect Instagram for live analytics",
+    }
+
+
+# ── Self-healing helpers ──────────────────────────────────────────────────────
+
+async def _tavily_scrape_instagram(username: str, niche: str) -> dict:
+    """Attempt 2: Tavily search to get publicly visible Instagram profile data.
+    Returns partial data with confidence score — never claimed as API-level accuracy."""
+    key = os.getenv("TAVILY_API_KEY", "")
+    if not key:
+        return {}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key":     key,
+                    "query":       f"{username} instagram followers engagement {niche}",
+                    "max_results": 5,
+                    "search_depth": "basic",
+                },
+            )
+            results = resp.json().get("results", [])
+        out = {}
+        for r in results:
+            content = (r.get("content") or "") + " " + (r.get("snippet") or "")
+            # follower count patterns: "405 followers", "1.2K followers", "1,234 followers"
+            m = re.search(r'([\d,]+\.?\d*)\s*[Kk]?\s*[Ff]ollowers', content)
+            if m and "follower_count" not in out:
+                raw = m.group(1).replace(",", "")
+                try:
+                    val = float(raw)
+                    if "K" in m.group(0) or "k" in m.group(0):
+                        val *= 1000
+                    out["follower_count"] = int(val)
+                    out["follower_source"] = "scraped (Tavily)"
+                    out["confidence"]     = 60
+                except Exception:
+                    pass
+        return out
+    except Exception as e:
+        print(f"[Analyst] Tavily scrape error: {e}")
+        return {}
+
+
+def _niche_benchmarks(niche: str, followers: int) -> dict:
+    """Attempt 4: niche industry benchmarks for ER / reach when no live data.
+    All values explicitly labeled as estimates — never passed off as measured."""
+    nl = niche.lower()
+    if any(w in nl for w in ["electronics","appliance","cooler","ac ","hvac","fan","heater","home"]):
+        base_er, reach_pct = 1.8, 0.15
+    elif any(w in nl for w in ["fashion","beauty","skincare","makeup","lifestyle"]):
+        base_er, reach_pct = 3.5, 0.22
+    elif any(w in nl for w in ["food","restaurant","cafe","bakery"]):
+        base_er, reach_pct = 3.0, 0.20
+    elif any(w in nl for w in ["fitness","gym","yoga","health","wellness"]):
+        base_er, reach_pct = 2.8, 0.18
+    elif any(w in nl for w in ["saas","software","tech","b2b","fintech"]):
+        base_er, reach_pct = 1.2, 0.12
+    elif any(w in nl for w in ["real estate","property","realty"]):
+        base_er, reach_pct = 1.5, 0.13
+    else:
+        base_er, reach_pct = 2.0, 0.15
+
+    # Smaller accounts typically outperform on ER
+    if 0 < followers < 1000:
+        base_er = round(base_er * 1.4, 1)
+    elif followers < 5000:
+        base_er = round(base_er * 1.2, 1)
+
+    est_reach = max(20, int(followers * reach_pct)) if followers > 0 else 0
+    return {
+        "er":             base_er,
+        "reach":          est_reach,
+        "source":         f"{niche} industry avg for <{max(1000, followers + 100):,}-follower accounts",
+        "confidence":     55,
     }
 
 
@@ -270,7 +390,12 @@ async def _gpt_insights_from_data(name, niche, followers, eng_rate, avg_reach, p
         return {}
 
 
-async def _generate_baseline_report(name, niche, audience, tone, brand_knowledge) -> dict:
+async def _generate_baseline_report(
+    name, niche, audience, tone, brand_knowledge,
+    stored_followers: int = 0,
+    benchmarks: dict = None,
+    scraped_data: dict = None,
+) -> dict:
     """Deep strategic baseline when no Instagram is connected.
     Focuses on brand-led strategy — NOT fake metrics. Downstream agents will
     skip metric-heavy framing when ig_connected is false."""
@@ -325,19 +450,38 @@ async def _generate_baseline_report(name, niche, audience, tone, brand_knowledge
             max_tokens=2500,
         )
         result = json.loads(resp.choices[0].message.content)
-        result["ig_connected"] = False
-        # Don't carry fake metrics — keep these explicitly null for downstream agents
-        result["followerCount"]     = 0
-        result["avgEngagementRate"] = 0
-        result["avgReach"]          = 0
-        result["topPosts"]          = []
+        result["ig_connected"]    = False
+        result["followerCount"]   = 0   # not measured
+        result["topPosts"]        = []
+
+        # When we have stored followers + benchmarks, surface them with explicit
+        # Estimate labels so the PPT shows real-looking numbers, not "Data Unavailable".
+        bm = benchmarks or {}
+        sc = scraped_data or {}
+        followers_to_use = sc.get("follower_count") or stored_followers or 0
+
+        if bm and followers_to_use:
+            result["followerCount"]      = followers_to_use
+            result["avgEngagementRate"]  = 0          # no measured ER
+            result["avgReach"]           = 0          # no measured reach
+            # Benchmarks carry explicit confidence labels — consumed by the PPT layer
+            result["estimated_er"]       = bm.get("er", 0)
+            result["estimated_reach"]    = bm.get("reach", 0)
+            result["benchmark_source"]   = bm.get("source", "")
+            result["benchmark_confidence"] = bm.get("confidence", 55)
+            result["data_source"]        = "scraped" if sc.get("follower_count") else "benchmark"
+        else:
+            result["avgEngagementRate"]  = 0
+            result["avgReach"]           = 0
+            result["data_source"]        = "none"
+
         return result
     except Exception as e:
         print(f"[Analyst] GPT baseline error: {e}")
-        return _fallback_report(name, niche)
+        return _fallback_report(name, niche, stored_followers=stored_followers, benchmarks=benchmarks)
 
 
-def _fallback_report(name: str, niche: str) -> dict:
+def _fallback_report(name: str, niche: str, stored_followers: int = 0, benchmarks: dict = None) -> dict:
     return {
         "brand_strengths": [
             "Clear niche positioning",
@@ -368,6 +512,14 @@ def _fallback_report(name: str, niche: str) -> dict:
             "Repurpose long-form content into bite-sized posts",
         ],
         "ig_connected": False,
-        "followerCount": 0,
+        "followerCount": stored_followers,
+        "avgEngagementRate": 0,
+        "avgReach": 0,
+        "estimated_er":    (benchmarks or {}).get("er", 0),
+        "estimated_reach": (benchmarks or {}).get("reach", 0),
+        "benchmark_source": (benchmarks or {}).get("source", ""),
+        "benchmark_confidence": (benchmarks or {}).get("confidence", 55),
+        "data_source": "benchmark" if benchmarks else "none",
+        "topPosts": [],
         "note": "Strategic baseline — connect Instagram in Brand Hub for live analytics",
     }
