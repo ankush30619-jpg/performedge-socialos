@@ -65,7 +65,7 @@ confirms scope.
 
 ### Phase 1 — SocialMediaManagerAgent (the Main AI Agent)
 - New [agents/llm_client.py](../agents/llm_client.py) — three-tier model
-  abstraction. `brain → claude-opus-4-8`, `scorer → claude-haiku-4-5-20251001`,
+  abstraction. `brain → gpt-5`, `scorer → gpt-5-mini`,
   `grunt → gpt-4o-mini`. Single point of provider control.
 - [agents/orchestrator.py](../agents/orchestrator.py) rewritten:
   - Class renamed `MasterOrchestratorAgent → SocialMediaManagerAgent`
@@ -176,10 +176,11 @@ confirms scope.
 
 ## 6. Next steps (recommended order)
 
-1. **Set `ANTHROPIC_API_KEY`** on the Railway agents service (project
-   `a92a52da-d156-4461-9a5f-7d5fb74b72f5`, service
-   `f3b1d214-919b-4ef2-9ad8-b39192db6429`). Without it the brain agents
-   will fail-fast with a clear error.
+1. **Confirm `OPENAI_API_KEY`** is set on the Railway agents service
+   (project `a92a52da-d156-4461-9a5f-7d5fb74b72f5`, service
+   `f3b1d214-919b-4ef2-9ad8-b39192db6429`). It was already set for
+   gpt-4o-mini — the same key now serves brain (gpt-5) and scorer
+   (gpt-5-mini) tiers too.
 2. **Commit + push to master**. Per project memory, push triggers a
    Railway deploy automatically.
 3. **`serviceInstanceDeploy(latestCommit: true)`** — explicit GraphQL

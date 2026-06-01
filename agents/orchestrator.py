@@ -5,7 +5,7 @@ The brain that sits above every pipeline agent, providing:
 
   AgentPerformanceRegistry  — real-time health tracking + historical metrics
   SUBAGENT_REGISTRY         — declarative map of sub-agents (role, tier, deps)
-  QualityScorer             — Claude Haiku 4.5 5-dimension output scoring
+  QualityScorer             — GPT-5-mini (scorer tier) 5-dimension scoring
   RootCauseDiagnoser        — Haiku-powered structured failure diagnosis
   SelfHealingWrapper        — 3-tier auto-recovery + hard anti-generic gate
   SocialMediaManagerAgent   — ties it together; wraps every agent call
@@ -215,7 +215,7 @@ class AgentPerformanceRegistry:
 # ══════════════════════════════════════════════════════════════════════════════
 
 class QualityScorer:
-    """Scores agent output on 5 dimensions using Claude Haiku 4.5.
+    """Scores agent output on 5 dimensions using the scorer-tier model.
 
     Scoring is lightweight and fast (< 1s typical) — uses a compact prompt
     that returns a single JSON object with scores + brief rationale.

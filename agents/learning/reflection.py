@@ -2,7 +2,7 @@
 reflection.py — end-of-run lesson synthesis
 ============================================
 
-Reads the last N learning rows for a brand and asks Claude Opus to distill
+Reads the last N learning rows for a brand and asks GPT-5 (brain tier) to distill
 patterns into 3-5 actionable lessons. Writes the result to
 `brands/<brand>/_lessons.md`.
 
@@ -68,7 +68,7 @@ def _user_prompt(brand_name: str, niche: str, rows_block: str) -> str:
 
 
 async def synthesize_lessons(brand_name: str, niche: str = "") -> str:
-    """Read recent runs, call Claude Opus, write _lessons.md, return the text."""
+    """Read recent runs, call GPT-5 (brain tier), write _lessons.md, return the text."""
     rows = read_recent_runs(brand_name, limit=20)
     if len(rows) < 3:
         # Not enough data to synthesize — leave the existing lessons in place.
