@@ -19,10 +19,31 @@ from datetime import datetime
 from pathlib import Path
 
 
-# Root path resolution: brands/ lives at the repo root. Walk up from this file.
+# Root path resolution.
+# Locally: file is at repo/agents/learning/memory_store.py → brands/ is at repo root.
+# Railway: rootDirectory=/agents, file at /app/learning/memory_store.py → no repo root.
+# Strategy: try a few candidates, fall back to a writable cwd-relative path.
 _THIS = Path(__file__).resolve()
-_REPO_ROOT = _THIS.parents[2]  # agents/learning/memory_store.py → repo root
-BRANDS_DIR = _REPO_ROOT / "brands"
+
+
+def _resolve_brands_dir() -> Path:
+    # Env-var override always wins (set BRANDS_DIR on Railway for a volume mount)
+    env = os.getenv("BRANDS_DIR", "").strip()
+    if env:
+        p = Path(env)
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    # Try the local repo layout first
+    for cand in (_THIS.parents[2] / "brands", _THIS.parents[1] / "brands", Path.cwd() / "brands"):
+        if cand.exists():
+            return cand
+    # Nothing exists yet — create alongside cwd (ephemeral on Railway, fine for v1)
+    fallback = Path.cwd() / "brands"
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
+
+
+BRANDS_DIR = _resolve_brands_dir()
 
 MAX_LOG_ENTRIES_TO_KEEP = 500  # ring-buffer cap so the file never grows forever
 

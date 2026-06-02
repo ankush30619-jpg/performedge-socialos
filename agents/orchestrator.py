@@ -27,7 +27,7 @@ import time
 from datetime import datetime
 from typing import Any, Callable, Awaitable
 
-from agents.llm_client import complete as llm_complete
+from llm_client import complete as llm_complete
 
 # ── Agents scored for quality (content-producing agents) ─────────────────────
 SCORED_AGENTS = {
@@ -824,7 +824,7 @@ class SocialMediaManagerAgent:
 
             # ── Continuous-learning: append this run to the brand's JSONL log ──
             try:
-                from agents.learning.memory_store import append_run
+                from learning.memory_store import append_run
                 append_run(
                     brand_name=brand_name,
                     agent_key=agent_key,
@@ -953,7 +953,7 @@ class SocialMediaManagerAgent:
         """Read previously-synthesized lessons for this brand. Used to inject
         LEARNED_PATTERNS into brain-agent prompts at the start of each run."""
         try:
-            from agents.learning.memory_store import read_lessons
+            from learning.memory_store import read_lessons
             return read_lessons(brand_name)
         except Exception:
             return ""

@@ -15,8 +15,8 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from agents.llm_client import complete as llm_complete
-from agents.learning.memory_store import read_recent_runs, write_lessons
+from llm_client import complete as llm_complete
+from learning.memory_store import read_recent_runs, write_lessons
 
 
 # Compact view sent to the LLM so we don't blow context on raw JSON
@@ -108,7 +108,7 @@ def top_lessons_for_prompt(brand_name: str, max_chars: int = 1200) -> str:
     Synchronous — meant to be called at the start of every agent prompt
     build to slot under a 'LEARNED_PATTERNS' header.
     """
-    from agents.learning.memory_store import read_lessons
+    from learning.memory_store import read_lessons
     text = read_lessons(brand_name)
     if not text:
         return ""

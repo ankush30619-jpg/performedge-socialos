@@ -218,7 +218,7 @@ async def start_run(req: RunRequest):
                 try:
                     brand_name = (initial_state.get("brand") or {}).get("name", "")
                     if brand_name:
-                        from agents.learning.reflection import synthesize_lessons
+                        from learning.reflection import synthesize_lessons
                         await synthesize_lessons(
                             brand_name=brand_name,
                             niche=(initial_state.get("brand") or {}).get("niche", ""),
