@@ -872,8 +872,15 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         warnings = []
         if ig_audit.get("goal_was_invalid"):
             warnings.append(f"⚠ Goal regenerated — submitted target was below current followers (auto-set to {goal:,})")
+        # Flag auto-generated goals so the reader knows to set their own target
+        if not user_follower_goal and not ig_audit.get("goal_was_invalid") and not ig_connected:
+            warnings.append(f"⚡ Target set to {goal:,} auto-calculated — set your own target in Follower Growth Goal for a custom plan")
         if not ig_audit.get("has_live_metrics"):
-            warnings.append("⚠ Limited audit — Instagram not connected. Connect IG for live content performance metrics.")
+            _ig_u = (brand.get("igUsername") or "").strip()
+            if _ig_u:
+                warnings.append(f"⚠ @{_ig_u} profile found · Live API not authorized · Strategy built from stored followers + niche research")
+            else:
+                warnings.append("⚠ Instagram not connected · Strategy built from brand brief + niche research")
         if warnings:
             txt(s, "  ·  ".join(warnings)[:170], Inches(0.4), Inches(0.95), Inches(9.2), Inches(0.28), 8, color=amber, italic=True)
         has_live  = ig_audit.get("has_live_metrics", False)
@@ -929,12 +936,18 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         # ── Slide 4: Social Media Audit ──
         s = prs.slides.add_slide(blank); bg(s, dark)
         slide_header(s, "03  ·  SOCIAL MEDIA AUDIT", "Where you stand today — measured numbers, not guesses.")
+        ig_username = (brand.get("igUsername") or "").strip()
         if ig_connected and followers > 0 and ig_audit.get("posts_analysed", 0) > 0:
             mode_label = f"Live Instagram data  ·  {ig_audit.get('posts_analysed', 0)} posts analysed  ·  Source: Meta Graph API  ·  Confidence: high"
+        elif followers > 0 and ig_username:
+            mode_label = (
+                f"Instagram profile found (@{ig_username})  ·  {followers:,} followers stored  ·  "
+                f"Live API not authorized — connect IG OAuth to unlock post-level analytics  ·  Confidence: medium"
+            )
         elif followers > 0:
-            mode_label = f"Stored data — {followers:,} followers verified  ·  Source: brand profile  ·  Confidence: medium  ·  Connect IG for live engagement metrics"
+            mode_label = f"Stored data — {followers:,} followers  ·  Source: brand profile  ·  Connect IG for live engagement metrics  ·  Confidence: medium"
         else:
-            mode_label = "Launch Mode  ·  No social profile connected  ·  Confidence: low  ·  Targets based on brand brief + niche research"
+            mode_label = "Launch Mode  ·  No Instagram profile connected  ·  Confidence: low  ·  Targets based on brand brief + niche research"
         txt(s, mode_label, Inches(0.4), Inches(0.95), Inches(9.2), Inches(0.28), 9, color=grey, italic=True)
         # Data display with honest confidence tiers:
         # live → exact number  |  benchmark/scraped → "~X% (Est.)"  |  none → "Unable to Retrieve"
@@ -965,8 +978,8 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
             reach_v   = "Unable to Retrieve"
             reach_col = grey
 
-        best_fmt_v  = ig_audit.get("best_content_type") or ("—" if posts_n == 0 else "Reel")
-        posts_v     = f"{posts_n}" if posts_n > 0 else ("—" if ds in ("benchmark","scraped") else "Unable to Retrieve")
+        best_fmt_v  = ig_audit.get("best_content_type") or ("N/A" if posts_n == 0 else "Reel")
+        posts_v     = f"{posts_n}" if posts_n > 0 else ("No live data" if ds in ("benchmark","scraped","stored") else "N/A")
         snap_stats = [
             (f"{followers:,}", "Followers",       brand_color),
             (er_v,              "Eng. Rate",      er_col),
@@ -981,10 +994,12 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
             txt(s, val, x+Inches(0.1), Inches(1.44), Inches(1.6), Inches(0.72), 20, bold=True, color=col, align=PP_ALIGN.CENTER)
             txt(s, lbl, x+Inches(0.05), Inches(2.18), Inches(1.7), Inches(0.3), 9, color=grey, align=PP_ALIGN.CENTER)
         cm = strategy.get("content_mix") or {}
+        # Filter out 0% entries — clutters the chart and misleads the reader
+        cm_filtered = {ct: pct for ct, pct in cm.items() if (pct or 0) > 0}
         bar(s, Inches(0.3), Inches(3.18), Inches(9.4), Inches(1.62), mid_dark)
         txt(s, "CONTENT TYPE MIX", Inches(0.45), Inches(3.26), Inches(9), Inches(0.3), 8, color=brand_color, bold=True)
         ct_hex = {"Reel":"3B82F6","AI Reel":"EC4899","Carousel":"10B981","Graphic":"A78BFA","Story":"F59E0B"}
-        for i, (ct, pct) in enumerate(list(cm.items())[:5]):
+        for i, (ct, pct) in enumerate(list(cm_filtered.items())[:5]):
             x = Inches(0.45 + i * 1.85)
             col_h = hex_to_rgb(ct_hex.get(ct, "6C3CE1"))
             txt(s, ct, x, Inches(3.6), Inches(1.7), Inches(0.3), 9, bold=True, color=col_h)
@@ -996,29 +1011,41 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         footer(s, 4)
 
         # ── Slide 5: Content Performance — What's Working ──
-        # Spec §quality_control: reject Posts Analysed=0 + Best Content Exists.
-        # When there's no live data, show an honest "connect IG" panel rather than
-        # fabricating insights about posts that don't exist.
+        # When live IG data exists: show actual post-level analysis.
+        # When no live data: show research-derived "what will work" insights
+        # from competitor/research data — NOT an empty "connect IG" placeholder.
+        # A paid investor-grade report should NEVER have a blank slide.
         s = prs.slides.add_slide(blank); bg(s, dark)
         slide_header(s, "04  ·  CONTENT PERFORMANCE — WHAT'S WORKING", "The formula behind your top-performing content.")
         if not has_live:
-            bar(s, Inches(0.3), Inches(1.5), Inches(9.4), Inches(3.0), mid_dark)
-            bar(s, Inches(0.3), Inches(1.5), Inches(9.4), Inches(0.05), amber)
-            txt(s, "CONTENT PERFORMANCE DATA UNAVAILABLE", Inches(0.5), Inches(1.7), Inches(9), Inches(0.4), 14, bold=True, color=amber)
-            txt(s, "Connect Instagram to enable content performance analysis.",
-                Inches(0.5), Inches(2.25), Inches(9), Inches(0.4), 12, color=white)
-            txt(s, "Per data-quality rules, this report does not generate 'what worked' insights",
-                Inches(0.5), Inches(2.75), Inches(9), Inches(0.35), 10, color=light)
-            txt(s, "without measured post-level data. Once IG is connected, this slide will populate",
-                Inches(0.5), Inches(3.05), Inches(9), Inches(0.35), 10, color=light)
-            txt(s, "with the actual hook pattern, replicable formula, and frequency that drove your top posts.",
-                Inches(0.5), Inches(3.35), Inches(9), Inches(0.35), 10, color=light)
+            # Build research-based "what works" content from GPT strategy + research data
+            what_works_items = (strategy.get("what_works") or [])[:4]
+            hook_items       = (strategy.get("hook_strategy") or [])[:3]
+            best_formats_raw = (strategy.get("content_mix") or {})
+            best_format_name = max(best_formats_raw, key=best_formats_raw.get) if best_formats_raw else "Reel"
+            formula_items    = []
+            if strategy.get("retention_strategy"):
+                formula_items.extend([str(r)[:68] for r in strategy["retention_strategy"][:2]])
+            if strategy.get("content_series_ideas"):
+                formula_items.extend([str(c)[:68] for c in strategy["content_series_ideas"][:2]])
+            formula_items = formula_items or hook_items[:4]
+            # Left panel: research-backed "what will work"
+            bar(s, Inches(0.3), Inches(1.15), Inches(4.5), Inches(3.95), mid_dark)
+            bar(s, Inches(0.3), Inches(1.15), Inches(4.5), Inches(0.05), green)
+            txt(s, f"WHAT WORKS IN {niche[:28].upper()} (RESEARCH-BACKED)", Inches(0.45), Inches(1.23), Inches(4.2), Inches(0.3), 7, color=green, bold=True)
+            for j, item in enumerate((what_works_items or [f"Educational {best_format_name}s outperform promotional content in this niche"])[:4]):
+                txt(s, f"✓  {str(item)[:72]}", Inches(0.45), Inches(1.62+j*0.77), Inches(4.2), Inches(0.68), 10, color=light)
+            # Right panel: replicable creative formula
+            bar(s, Inches(5.0), Inches(1.15), Inches(4.7), Inches(3.95), mid_dark)
+            bar(s, Inches(5.0), Inches(1.15), Inches(4.7), Inches(0.05), accent)
+            txt(s, "REPLICABLE FORMULA TO ADOPT", Inches(5.15), Inches(1.23), Inches(4.4), Inches(0.3), 7, color=accent, bold=True)
+            for j, item in enumerate((formula_items or hook_items)[:4]):
+                txt(s, f"→  {str(item)[:72]}", Inches(5.15), Inches(1.62+j*0.77), Inches(4.4), Inches(0.68), 10, color=light)
+            # Data source note
+            txt(s, "★ Based on niche research + competitor analysis · Connect IG for actual post-level data",
+                Inches(0.4), Inches(5.27), Inches(9.2), Inches(0.22), 8, color=grey, italic=True)
             footer(s, 5)
-            # Skip to slide 6
-            _skip_working = True
-        else:
-            _skip_working = False
-        if not _skip_working:
+        if has_live:
             best_bd  = ep.get("content_best_breakdown") or {}
             diag     = strategy.get("performance_diagnosis") or {}
             working  = (diag.get("whats_working") or strategy.get("what_works") or [])[:4]
@@ -1043,17 +1070,31 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
                 txt(s, f"→  {str(item)[:70]}", Inches(5.15), Inches(1.62+j*0.77), Inches(4.4), Inches(0.68), 10, color=light)
             footer(s, 5)
 
-        # ── Slide 6: Content Performance — What's Failing ──
+        # ── Slide 6: Content Performance — What's Failing / Patterns to Avoid ──
         s = prs.slides.add_slide(blank); bg(s, dark)
         slide_header(s, "05  ·  CONTENT PERFORMANCE — WHAT'S FAILING", "Stop doing this. Pivot here instead.")
         if not has_live:
-            bar(s, Inches(0.3), Inches(1.5), Inches(9.4), Inches(3.0), mid_dark)
-            bar(s, Inches(0.3), Inches(1.5), Inches(9.4), Inches(0.05), amber)
-            txt(s, "FAILURE PATTERN DATA UNAVAILABLE", Inches(0.5), Inches(1.7), Inches(9), Inches(0.4), 14, bold=True, color=amber)
-            txt(s, "Connect Instagram so we can identify your actual underperforming patterns —",
-                Inches(0.5), Inches(2.25), Inches(9), Inches(0.4), 12, color=white)
-            txt(s, "what to stop, what to do instead, and the specific formats that aren't earning their place.",
-                Inches(0.5), Inches(2.65), Inches(9), Inches(0.4), 11, color=light)
+            # Build competitor/research-based "stop doing this" insights
+            what_to_stop_items = (strategy.get("what_to_stop") or [])[:4]
+            missed_opps        = (strategy.get("performance_diagnosis") or {}).get("missed_opportunities") or []
+            bottlenecks        = (strategy.get("performance_diagnosis") or {}).get("bottlenecks") or []
+            pivot_items        = (strategy.get("conversion_strategy") or strategy.get("growth_tactics") or [])[:4]
+            bar(s, Inches(0.3), Inches(1.15), Inches(4.5), Inches(3.95), mid_dark)
+            bar(s, Inches(0.3), Inches(1.15), Inches(4.5), Inches(0.05), red)
+            txt(s, f"COMMON MISTAKES IN {niche[:26].upper()}", Inches(0.45), Inches(1.23), Inches(4.2), Inches(0.3), 7, color=red, bold=True)
+            stop_list = what_to_stop_items or ["Generic promotional posts with no educational value",
+                                               "Static images with no hook or text overlay",
+                                               "Posting without a consistent CTA structure"]
+            for j, item in enumerate(stop_list[:4]):
+                txt(s, f"✗  {str(item)[:72]}", Inches(0.45), Inches(1.62+j*0.77), Inches(4.2), Inches(0.68), 10, color=light)
+            bar(s, Inches(5.0), Inches(1.15), Inches(4.7), Inches(3.95), mid_dark)
+            bar(s, Inches(5.0), Inches(1.15), Inches(4.7), Inches(0.05), green)
+            txt(s, "DO THIS INSTEAD (COMPETITOR-DERIVED)", Inches(5.15), Inches(1.23), Inches(4.4), Inches(0.3), 7, color=green, bold=True)
+            do_instead = (missed_opps or bottlenecks or pivot_items)[:4]
+            for j, item in enumerate(do_instead[:4]):
+                txt(s, f"→  {str(item)[:72]}", Inches(5.15), Inches(1.62+j*0.77), Inches(4.4), Inches(0.68), 10, color=light)
+            txt(s, "★ Based on competitor gap analysis + niche research · Connect IG for actual underperformance data",
+                Inches(0.4), Inches(5.27), Inches(9.2), Inches(0.22), 8, color=grey, italic=True)
             footer(s, 6)
         else:
             worst_bd = ep.get("content_worst_breakdown") or {}
@@ -1186,10 +1227,11 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         _er_disp    = f"{avg_er}%" if has_live else (f"~{ig_audit.get('est_er',0)}% (Est.)" if ig_audit.get('est_er',0) else "—")
         _reach_disp = f"{avg_reach:,}" if has_live else (f"~{ig_audit.get('est_reach',0):,} (Est.)" if ig_audit.get('est_reach',0) else "—")
         _req_reach  = f"{int(ig_audit.get('est_reach',0) * 1.5):,}+" if ig_audit.get('est_reach',0) and not has_live else (f"{int(avg_reach * 1.5):,}+" if avg_reach else "See strategy")
+        _cur_daily = f"~{round(est_wk/7,1)}/day" if est_wk else "N/A"
         rows11  = [
             ("Followers",      f"{followers:,}",    f"{goal:,}",        f"+{gap:,}",            brand_color),
             ("Weekly Growth",  f"{est_wk}/wk",       f"{req_wk}/wk",     f"{accel}x needed",     amber),
-            ("Daily Growth",   "—",                  f"{req_day}/day",    "—",                    accent),
+            ("Daily Growth",   _cur_daily,            f"{req_day}/day",   f"+{round(req_day - est_wk/7,1)}/day gap", accent),
             ("Engagement Rate",_er_disp,              "3-5%",             "Industry benchmark",   green),
             ("Avg Reach",      _reach_disp,           _req_reach,         "+50% target",          grey),
         ]
@@ -1348,11 +1390,19 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         for col_label, x in hdr_cols16:
             txt(s, col_label, x+Inches(0.08), Inches(1.19), Inches(1.5), Inches(0.3), 7, color=accent, bold=True)
         perf_col_map = {"high":green,"medium":amber,"low":red}
+        def _clean_perf(val: str) -> str:
+            """Strip GPT data-quality prefixes like 'ASSUMPTION: ' or 'ESTIMATE: '."""
+            v = str(val or "").strip()
+            for prefix in ("assumption:", "estimate:", "assumption -", "estimate -"):
+                if v.lower().startswith(prefix):
+                    v = v[len(prefix):].strip()
+            return v.lower()
+
         for i, pb in enumerate(pillar_breakdown[:4]):
             y = Inches(1.57+i*0.9)
             bar(s, Inches(0.3), y, Inches(9.4), Inches(0.84), mid_dark if i%2==0 else RGBColor(0x16,0x10,0x30))
-            perf = str(pb.get("current_performance","medium")).lower()
-            pot  = str(pb.get("growth_potential","high")).lower()
+            perf = _clean_perf(pb.get("current_performance","medium"))
+            pot  = _clean_perf(pb.get("growth_potential","high"))
             txt(s, str(pb.get("pillar",""))[:45], Inches(0.42), y+Inches(0.1), Inches(3.3), Inches(0.64), 11, color=white)
             txt(s, perf.upper(), Inches(3.95), y+Inches(0.2), Inches(1.4), Inches(0.44), 11, bold=True, color=perf_col_map.get(perf,white))
             txt(s, pot.upper(),  Inches(5.58), y+Inches(0.2), Inches(1.3), Inches(0.44), 11, bold=True, color=perf_col_map.get(pot,white))
@@ -1412,15 +1462,24 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         weeks_5_12 = ep.get("execution_calendar_weeks_5_to_12") or strategy.get("weekly_plan") or []
         wks_5_8    = [w for w in weeks_5_12 if isinstance(w,dict) and w.get("week",0) <= 8][:4] or weeks_5_12[:4]
         wk_cols    = [brand_color, green, accent, amber]
+        def _wk_str(val, maxlen=80):
+            """Convert a week plan field to a clean display string.
+            Handles both string and list values (GPT returns both)."""
+            if isinstance(val, list):
+                return (" · ".join(str(v) for v in val))[:maxlen]
+            return str(val or "")[:maxlen]
+
         if wks_5_8:
             for i, wk in enumerate(wks_5_8[:4]):
                 wc = wk_cols[i%4]; x = Inches(0.3+i*2.4)
                 bar(s, x, Inches(1.15), Inches(2.2), Inches(4.05), mid_dark)
                 bar(s, x, Inches(1.15), Inches(2.2), Inches(0.05), wc)
                 txt(s, f"WEEK {wk.get('week',i+5)}", x+Inches(0.12), Inches(1.23), Inches(2.0), Inches(0.32), 8, color=wc, bold=True)
-                txt(s, str(wk.get("theme",""))[:35],  x+Inches(0.12), Inches(1.58), Inches(2.0), Inches(0.38), 12, bold=True, color=white)
-                txt(s, str(wk.get("reels","") or wk.get("content_tasks",""))[:80], x+Inches(0.12), Inches(2.0), Inches(2.0), Inches(1.0), 10, color=light)
-                txt(s, f"KPI: {str(wk.get('goal','') or wk.get('kpi_target',''))[:42]}", x+Inches(0.12), Inches(3.08), Inches(2.0), Inches(0.35), 9, color=wc)
+                txt(s, _wk_str(wk.get("theme",""), 35), x+Inches(0.12), Inches(1.58), Inches(2.0), Inches(0.38), 12, bold=True, color=white)
+                reels_val = wk.get("reels","") or wk.get("content_tasks","")
+                txt(s, _wk_str(reels_val, 80), x+Inches(0.12), Inches(2.0), Inches(2.0), Inches(1.0), 10, color=light)
+                kpi_val = wk.get("goal","") or wk.get("kpi_target","")
+                txt(s, f"KPI: {_wk_str(kpi_val, 42)}", x+Inches(0.12), Inches(3.08), Inches(2.0), Inches(0.35), 9, color=wc)
         else:
             themes = strategy.get("monthly_themes") or []
             fb60 = [
@@ -1448,9 +1507,11 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
                 bar(s, x, Inches(1.15), Inches(2.2), Inches(4.05), mid_dark)
                 bar(s, x, Inches(1.15), Inches(2.2), Inches(0.05), wc)
                 txt(s, f"WEEK {wk.get('week',i+9)}", x+Inches(0.12), Inches(1.23), Inches(2.0), Inches(0.32), 8, color=wc, bold=True)
-                txt(s, str(wk.get("theme",""))[:35], x+Inches(0.12), Inches(1.58), Inches(2.0), Inches(0.38), 12, bold=True, color=white)
-                txt(s, str(wk.get("reels","") or wk.get("content_tasks",""))[:80], x+Inches(0.12), Inches(2.0), Inches(2.0), Inches(1.0), 10, color=light)
-                txt(s, f"KPI: {str(wk.get('goal','') or wk.get('kpi_target',''))[:42]}", x+Inches(0.12), Inches(3.08), Inches(2.0), Inches(0.35), 9, color=wc)
+                txt(s, _wk_str(wk.get("theme",""), 35), x+Inches(0.12), Inches(1.58), Inches(2.0), Inches(0.38), 12, bold=True, color=white)
+                reels_val9 = wk.get("reels","") or wk.get("content_tasks","")
+                txt(s, _wk_str(reels_val9, 80), x+Inches(0.12), Inches(2.0), Inches(2.0), Inches(1.0), 10, color=light)
+                kpi_val9 = wk.get("goal","") or wk.get("kpi_target","")
+                txt(s, f"KPI: {_wk_str(kpi_val9, 42)}", x+Inches(0.12), Inches(3.08), Inches(2.0), Inches(0.35), 9, color=wc)
         else:
             fb90 = [
                 ("DAYS 61-75", accent, (strategy.get("viral_opportunities") or ["Authority Reels series","UGC campaign launch"])[:3]),
@@ -1471,13 +1532,20 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         kpi_90 = strategy.get("kpi_targets_90day") or strategy.get("kpi_targets_30day") or ar.get("kpi_targets_90day") or {}
         if not isinstance(kpi_90, dict): kpi_90 = {}
         kpi_fol   = int(kpi_90.get("followers", goal) or goal)
-        kpi_er    = kpi_90.get("avg_engagement_rate", "3-5")
-        kpi_reach = kpi_90.get("avg_reach", int(avg_reach*1.5) if avg_reach else 1000)
-        kpi_reels = kpi_90.get("reels_per_week", 4)
-        kpi_saves = kpi_90.get("saves_per_post", 20)
+        # Fix bug: kpi_er may already contain "%" from GPT output → strip before appending
+        kpi_er_raw = str(kpi_90.get("avg_engagement_rate", "3-5") or "3-5")
+        kpi_er_str = kpi_er_raw.rstrip("%").rstrip("%%").strip()
+        kpi_er_disp = f"{kpi_er_str}%"
+        kpi_reach_raw = kpi_90.get("avg_reach", int(avg_reach*1.5) if avg_reach else 500)
+        try:
+            kpi_reach = int(kpi_reach_raw)
+        except (TypeError, ValueError):
+            kpi_reach = 500
+        kpi_reels = kpi_90.get("reels_per_week", 7)
+        kpi_saves = kpi_90.get("saves_per_post", 15)
         kpi_items21 = [
             ("FOLLOWER TARGET", f"{followers:,} → {kpi_fol:,}", brand_color),
-            ("ENGAGEMENT RATE", f"{kpi_er}%",                   green),
+            ("ENGAGEMENT RATE", kpi_er_disp,                    green),
             ("REACH PER POST",  f"{kpi_reach:,}+",              accent),
             ("REELS / WEEK",    f"{kpi_reels}x",                amber),
             ("SAVES PER POST",  f"{kpi_saves}+",                RGBColor(0xEC,0x48,0x99)),
