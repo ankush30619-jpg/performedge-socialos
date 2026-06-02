@@ -257,7 +257,8 @@ class QualityScorer:
                             "You are a quality assurance expert for AI-generated social media content. "
                             "Score outputs honestly — 1 = terrible, 10 = perfect. "
                             "Be strict: generic outputs that could apply to any brand should score 1-4. "
-                            "Return ONLY a JSON object."
+                            "Return ONLY a JSON object with exactly these keys: "
+                            "specificity, evidence, brand_align, completeness, anti_generic, diagnosis."
                         ),
                     },
                     {
@@ -277,9 +278,13 @@ class QualityScorer:
                 ],
                 tier="scorer",
                 temperature=0.1,
-                max_tokens=400,
+                max_tokens=800,       # Bug 5: was 400 — GPT-5-mini needs more budget for JSON + reasoning
                 response_json=True,
             )
+            # Bug 5: guard against empty responses from scorer
+            if not raw or not raw.strip():
+                print(f"[QualityScorer] empty response for {agent_key} — skipping score")
+                return {}
             scores = json.loads(raw)
 
             # Composite score — specificity and anti_generic weighted 1.5x
@@ -301,14 +306,42 @@ class QualityScorer:
             return scores
 
         except Exception as ex:
-            print(f"[Orchestrator] QualityScorer error for {agent_key}: {ex}")
+            # Bug 5: log the error visibly + emit SSE so the manager sees it
+            print(f"[QualityScorer] {agent_key} error: {ex}")
+            await event_queue.put({
+                "type":      "orchestrator_quality_score",
+                "agentKey":  agent_key,
+                "message":   f"Scorer error (non-fatal): {str(ex)[:200]}",
+                "data":      {"error": str(ex)[:200]},
+                "timestamp": datetime.utcnow().isoformat(),
+            })
             return {}
+
+
+def _normalize_text(t: str) -> str:
+    """Unicode-normalize text for brand-token matching.
+
+    Unifies curly/straight apostrophes, NFKD-decomposes, then lowercases.
+    This fixes false violations when brand DB stores "Mishika's" (U+2019)
+    but the caption uses a straight apostrophe (U+0027).
+    """
+    import unicodedata
+    t = unicodedata.normalize("NFKD", t)
+    # Unify all apostrophe-like chars to straight single quote
+    t = re.sub(r"[''`‘’ʼʹ`]", "'", t)
+    return t.lower()
 
 
 def _summarize_output(agent_key: str, output: dict) -> str:
     """Extract a compact, scorable summary from agent output."""
     if not isinstance(output, dict):
         return ""
+
+    # Bug 1 fix: growthPlanner wraps its metrics inside "growth_strategy".
+    # Unwrap it so the scorer sees pillars/growth_tactics/hook_strategy/performance_diagnosis.
+    working_output = output
+    if agent_key == "growthPlanner":
+        working_output = output.get("growth_strategy") or output
 
     # Per-agent: pick the most content-rich fields for scoring
     fields = {
@@ -322,18 +355,25 @@ def _summarize_output(agent_key: str, output: dict) -> str:
     keys = fields.get(agent_key, [])
     parts = []
 
-    # Handle copywriter specially
+    # Handle copywriter specially — grab first 3 posts for richer scoring
     if agent_key == "copywriter":
-        posts = output.get("posts_with_copy") or []
-        if posts:
-            p = posts[0]
-            parts.append(f"Hook: {str(p.get('hook',''))[:100]}")
-            parts.append(f"Caption: {str(p.get('caption',''))[:150]}")
-            parts.append(f"CTA: {str(p.get('cta',''))[:80]}")
+        posts = working_output.get("posts_with_copy") or []
+        for post in posts[:3]:
+            parts.append(f"Hook: {str(post.get('hook',''))[:100]}")
+            parts.append(f"Caption: {str(post.get('caption',''))[:150]}")
+            parts.append(f"CTA: {str(post.get('cta',''))[:80]}")
         return "\n".join(parts)
 
+    # Handle strategist specially — content_calendar is a list of post briefs
+    if agent_key == "strategist":
+        calendar = working_output.get("content_calendar") or []
+        for post in calendar[:4]:
+            if isinstance(post, dict):
+                parts.append(f"topic: {post.get('topic','')[:100]} | pillar: {post.get('pillar','')[:60]} | brief: {post.get('copy_brief','')[:120]}")
+        return "\n".join(parts)[:800]
+
     for k in keys:
-        v = output.get(k)
+        v = working_output.get(k)
         if v is None:
             continue
         if isinstance(v, list):
@@ -465,12 +505,23 @@ class SelfHealingWrapper:
             if phrase in summary:
                 violations.append(f"banned phrase: '{phrase}'")
 
+        # 2b) Bug 2: detect fallback-flagged calendar posts — these are generic
+        # templates and must be rejected before they reach the copywriter.
+        if agent_key == "strategist":
+            calendar = output.get("content_calendar") or []
+            fallback_count = sum(1 for p in calendar if isinstance(p, dict) and p.get("_is_fallback"))
+            if fallback_count > 0:
+                violations.append(f"strategist: {fallback_count}/{len(calendar)} posts are fallback templates — LLM failed")
+
         # 3) Per-agent rules
         if rules_id == "copy_brand_specific_tokens":
             posts = output.get("posts_with_copy") or []
-            required_tokens = [t.lower() for t in (brand_name, niche) if t]
+            # Bug 3 fix: normalize apostrophes before comparison so that
+            # curly-apostrophe brand names (e.g. "Mishika's" U+2019 from DB)
+            # match straight-apostrophe captions (U+0027) and vice-versa.
+            required_tokens = [_normalize_text(t) for t in (brand_name, niche) if t]
             for i, p in enumerate(posts[:6]):  # check first 6 posts
-                caption = (p.get("caption") or "").lower()
+                caption = _normalize_text(p.get("caption") or "")
                 if required_tokens and not any(t in caption for t in required_tokens):
                     violations.append(f"post {i}: caption missing brand-specific token")
 
@@ -485,8 +536,10 @@ class SelfHealingWrapper:
                         violations.append(f"pillar {pi}: missing niche token '{niche_token}'")
 
         elif rules_id == "growth_concrete_numbers":
-            tactics = (output.get("growth_tactics") or [])
-            for ti, t in enumerate(tactics):
+            # Bug 1 fix: growth_tactics lives inside growth_strategy
+            strategy = output.get("growth_strategy") or output
+            tactics = (strategy.get("growth_tactics") or output.get("growth_tactics") or [])
+            for ti, t in enumerate(tactics[:8]):
                 text = str(t.get("tactic", "") if isinstance(t, dict) else t)
                 if not re.search(r"\d", text):
                     violations.append(f"tactic {ti}: missing concrete number")

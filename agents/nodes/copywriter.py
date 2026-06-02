@@ -15,6 +15,7 @@ Processes posts in batches of 5 for efficiency.
 """
 import asyncio
 import json
+import re
 from llm_client import complete as llm_complete
 from state import SocialOSState
 from skills.registry import (
@@ -152,10 +153,12 @@ async def copywriter_node(state: SocialOSState, event_queue: asyncio.Queue) -> d
         voice_rules.append(f"- Avoid this type of content: {worst_content}")
 
     voice_rules.append("")
-    voice_rules.append("HASHTAG RULES:")
-    voice_rules.append("- 20-30 hashtags per post")
-    voice_rules.append("- Mix: broad reach tags + niche community tags + brand-specific tags")
-    voice_rules.append("- NO hashtag spam — all hashtags must be genuinely relevant to the post")
+    voice_rules.append("HASHTAG RULES (2026 standard):")
+    voice_rules.append("- 10-15 hashtags per post MAXIMUM — never 20-30")
+    voice_rules.append("- Tier breakdown: 2-3 broad (500K+ posts), 5-7 mid-tier (100K-500K), 3-5 niche (10K-100K)")
+    voice_rules.append("- NEVER include & ( ) spaces or special characters inside a hashtag — only letters, numbers, underscores")
+    voice_rules.append("- WRONG: #aircoolerdistribution&coolingsolutions — RIGHT: #AirCoolerHaryana")
+    voice_rules.append("- Every hashtag must be a real searchable tag, not a sentence fragment")
 
     # ── 2026 brain-tier prompt: hard prefix + learned lessons + frameworks ──
     learned_block = (
@@ -302,7 +305,9 @@ async def _write_batch(
         f"  cta_variations: ARRAY of EXACTLY 3 distinct CTAs — 3 DIFFERENT mechanisms from the CTA\n"
         f"    rotation (Curiosity/Urgency/Direct/Community/Soft/Comment/Save/Share/DM). Each 1 line.\n"
         f"  seo_keywords: array of 3-5 search keywords (NOT hashtags) for caption SEO\n"
-        f"  hashtags: array of 20-30 hashtags (strings with #) — mix broad/niche/brand from the pool\n"
+        f"  hashtags: array of 10-15 hashtags ONLY (strings starting with #). "
+        f"Tier: 2-3 broad (500K+ posts) + 5-7 mid-tier (100K-500K) + 3-5 niche (10K-100K). "
+        f"NEVER use & or special chars inside a hashtag. Real searchable tags only.\n"
         f"  visual_brief: 1 sentence describing the visual/creative direction\n"
         f"  audio_suggestion: object (set null for non-Reel posts) with keys:\n"
         f"    track_name (trending audio name or 'Original audio'), vibe (1-3 words), why_it_works (1 sentence)\n"
@@ -372,6 +377,27 @@ async def _write_batch(
         gpt = results_raw[i] if i < len(results_raw) else {}
         # Drop internal rotation hints so they never reach the DB / frontend.
         post = {k: v for k, v in post.items() if not k.startswith("_")}
+
+        # Bug 4: sanitize hashtags — strip invalid chars, enforce 10-15 limit
+        raw_hashtags = gpt.get("hashtags") or []
+        clean_hashtags = []
+        for tag in raw_hashtags:
+            tag = str(tag).strip()
+            if not tag.startswith("#"):
+                tag = "#" + tag
+            # Remove any char that isn't alphanumeric or underscore after the #
+            inner = re.sub(r"[^a-zA-Z0-9_ऀ-ॿ؀-ۿ가-힯]", "", tag[1:])
+            if inner and len(inner) >= 2:
+                clean_hashtags.append("#" + inner)
+        # Deduplicate and cap at 15
+        seen = set()
+        deduped = []
+        for t in clean_hashtags:
+            tl = t.lower()
+            if tl not in seen:
+                seen.add(tl)
+                deduped.append(t)
+        gpt["hashtags"] = deduped[:15]
         content_type = post.get("contentType", "")
         is_reel      = content_type in ("Reel", "AI Reel")
         is_carousel  = content_type == "Carousel"

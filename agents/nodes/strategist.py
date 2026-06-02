@@ -212,7 +212,8 @@ async def _generate_calendar(
 
     user_prompt = "\n".join(user_prompt_parts)
 
-    try:
+    async def _call_llm_once() -> list:
+        """Call the LLM once and parse the calendar. Returns posts_raw list or raises."""
         raw_text = await llm_complete(
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -223,43 +224,58 @@ async def _generate_calendar(
             max_tokens=4000,
             response_json=True,
         )
-
-        raw     = json.loads(raw_text)
+        if not raw_text or not raw_text.strip():
+            raise ValueError("Empty response from brain model")
+        raw = json.loads(raw_text)
         posts_raw = raw.get("posts") or raw.get("calendar") or []
+        if not posts_raw:
+            raise ValueError(f"No posts/calendar key in response. Keys: {list(raw.keys())}")
+        return posts_raw
 
-        today    = datetime.utcnow().date()
-        calendar = []
-        for i, p in enumerate(posts_raw[:days_ahead]):
-            day_offset = p.get("day", i + 1)
-            post_date  = today + timedelta(days=day_offset)
-            ct = p.get("contentType", "Graphic")
-            if ct not in CONTENT_TYPES:
-                ct = "Graphic"
-            calendar.append({
-                "date":             post_date.isoformat(),
-                "contentType":      ct,
-                "topic":            p.get("topic", f"Post {i+1}"),
-                "pillar":           p.get("pillar", pillars[i % len(pillars)]),
-                "copy_brief":       p.get("copy_brief", ""),
-                "visual_direction": p.get("visual_direction", ""),
-                "buyer_stage":      p.get("buyer_stage", "awareness"),
-                "ice_score":        p.get("ice_score", {}),
-                "status":           "draft",
-            })
+    posts_raw = None
+    for attempt in range(1, 3):  # Bug 2: retry once before falling back
+        try:
+            posts_raw = await _call_llm_once()
+            break
+        except Exception as e:
+            print(f"[Strategist] LLM attempt {attempt} failed: {e}")
+            import traceback; traceback.print_exc()
+            if attempt == 2:
+                print("[Strategist] Both attempts failed — using fallback calendar (flagged for hard gate)")
+                fallback = _fallback_calendar(name, niche, days_ahead, content_mix, pillars)
+                for fb in fallback:
+                    fb["_is_fallback"] = True   # Hard gate will catch and reject these
+                return fallback
 
-        # Pad if needed
-        if len(calendar) < days_ahead:
-            fallback = _fallback_calendar(name, niche, days_ahead - len(calendar), content_mix, pillars)
-            for fb in fallback:
-                fb["date"] = (today + timedelta(days=len(calendar) + 1)).isoformat()
-                calendar.append(fb)
+    today    = datetime.utcnow().date()
+    calendar = []
+    for i, p in enumerate(posts_raw[:days_ahead]):
+        day_offset = p.get("day", i + 1)
+        post_date  = today + timedelta(days=day_offset)
+        ct = p.get("contentType", "Graphic")
+        if ct not in CONTENT_TYPES:
+            ct = "Graphic"
+        calendar.append({
+            "date":             post_date.isoformat(),
+            "contentType":      ct,
+            "topic":            p.get("topic", f"Post {i+1}"),
+            "pillar":           p.get("pillar", pillars[i % len(pillars)]),
+            "copy_brief":       p.get("copy_brief", ""),
+            "visual_direction": p.get("visual_direction", ""),
+            "buyer_stage":      p.get("buyer_stage", "awareness"),
+            "ice_score":        p.get("ice_score", {}),
+            "status":           "draft",
+        })
 
-        return calendar
+    # Pad if needed (use fallback for missing days but flag them)
+    if len(calendar) < days_ahead:
+        fallback = _fallback_calendar(name, niche, days_ahead - len(calendar), content_mix, pillars)
+        for fb in fallback:
+            fb["date"] = (today + timedelta(days=len(calendar) + 1)).isoformat()
+            fb["_is_fallback"] = True
+        calendar.extend(fallback)
 
-    except Exception as e:
-        print(f"[Strategist] GPT calendar error: {e}")
-        import traceback; traceback.print_exc()
-        return _fallback_calendar(name, niche, days_ahead, content_mix, pillars)
+    return calendar
 
 
 def _fallback_calendar(name: str, niche: str, days_ahead: int, content_mix: dict, pillars: list) -> list:
