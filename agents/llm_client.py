@@ -73,9 +73,21 @@ def _is_gpt5_family(model: str) -> bool:
     """GPT-5 and reasoning-family models have different API constraints:
        - Use `max_completion_tokens` instead of `max_tokens`.
        - `temperature` only accepts the default (1.0); custom values rejected.
+       - Reasoning tokens are deducted from the same budget as output, so
+         callers must allocate enough headroom OR set reasoning_effort=minimal.
     """
     m = (model or "").lower()
     return m.startswith("gpt-5") or m.startswith("o1") or m.startswith("o3")
+
+
+# GPT-5 deducts reasoning tokens from max_completion_tokens. With the default
+# reasoning_effort the model can burn the entire budget on hidden reasoning,
+# producing an empty visible response. For content-generation use cases we
+# want minimal reasoning + a generous output budget, so:
+#   1) Multiply the caller's max_tokens by this factor to leave room.
+#   2) Pass reasoning_effort="minimal" to keep latency + cost predictable.
+GPT5_TOKEN_MULTIPLIER = 3
+GPT5_MIN_BUDGET       = 8000
 
 
 async def complete(
@@ -86,12 +98,14 @@ async def complete(
     max_tokens: int = 2000,
     response_json: bool = False,
     model_override: str | None = None,
+    reasoning_effort: str = "minimal",
 ) -> str:
     """Run a completion against the model bound to `tier`. Returns raw text.
 
     `response_json=True` requests JSON-mode output. The function transparently
     adapts to GPT-5-family API differences (max_completion_tokens, fixed
-    temperature) so callers can use one signature for all tiers.
+    temperature, reasoning_effort) so callers can use one signature for all
+    tiers.
     """
     oai = _get_openai()
     model = model_override or MODEL_BY_TIER[tier]
@@ -101,12 +115,14 @@ async def complete(
         "model":    model,
         "messages": messages,
     }
-    # max_tokens parameter name + cap differ between families
     if is_gpt5:
-        kwargs["max_completion_tokens"] = max_tokens
-        # GPT-5 / o-series only accept default temperature (1.0). Silently
-        # drop a custom temperature rather than erroring — callers shouldn't
-        # have to special-case the tier.
+        # Inflate the budget so reasoning doesn't starve the output.
+        budget = max(max_tokens * GPT5_TOKEN_MULTIPLIER, GPT5_MIN_BUDGET)
+        kwargs["max_completion_tokens"] = budget
+        # GPT-5 supports reasoning_effort: minimal | low | medium | high.
+        # "minimal" optimizes for fast structured output (right for content gen).
+        kwargs["reasoning_effort"] = reasoning_effort
+        # GPT-5 / o-series only accept default temperature — silently drop.
     else:
         kwargs["max_tokens"]  = max_tokens
         kwargs["temperature"] = temperature
@@ -115,7 +131,16 @@ async def complete(
         kwargs["response_format"] = {"type": "json_object"}
 
     resp = await oai.chat.completions.create(**kwargs)
-    return resp.choices[0].message.content or ""
+    content = resp.choices[0].message.content or ""
+    if not content.strip() and is_gpt5:
+        # Diagnostic: if GPT-5 still returned empty after our adjustments,
+        # log enough to fix the next iteration. finish_reason tells us why.
+        fr = resp.choices[0].finish_reason
+        usage = getattr(resp, "usage", None)
+        rt = getattr(usage, "completion_tokens_details", None) if usage else None
+        print(f"[llm_client] WARN empty GPT-5 response | model={model} "
+              f"finish={fr} budget={budget} usage={usage} reasoning={rt}")
+    return content
 
 
 # ── Convenience for "I just want text quickly" callers ────────────────────────
