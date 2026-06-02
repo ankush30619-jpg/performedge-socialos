@@ -65,15 +65,15 @@ export function Sidebar() {
           <span className="font-bold text-base tracking-tight text-white">
             Social<span className="text-brand-light">OS</span>
           </span>
-          <p className="text-[9px] text-white/25 -mt-0.5 tracking-wider uppercase">PerformEdge</p>
+          <p className="text-[9px] text-white/60 -mt-0.5 tracking-wider uppercase" aria-hidden="true">PerformEdge</p>
         </div>
       </div>
 
       {/* Brand Switcher */}
       <div className="px-3 py-3 border-b border-white/[0.06]">
-        <p className="text-[10px] uppercase tracking-widest text-white/25 px-1 mb-2">Active Brand</p>
+        <p className="text-[10px] uppercase tracking-widest text-white/50 px-1 mb-2">Active Brand</p>
         {brands.length === 0 ? (
-          <Link href="/brands" className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-white/[0.08] hover:border-brand/30 text-xs text-white/30 hover:text-white/60 transition-colors">
+          <Link href="/brands" className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-white/[0.08] hover:border-brand/30 text-xs text-white/55 hover:text-white/80 transition-colors">
             <Zap className="w-3.5 h-3.5" /> Add your first brand
           </Link>
         ) : (
@@ -145,7 +145,7 @@ export function Sidebar() {
       <div className="px-3 py-3 border-t border-white/[0.06]">
         <button
           onClick={() => { window.location.href = "/auth/login"; }}
-          className="flex items-center gap-2.5 w-full px-3 py-2 rounded-xl text-xs text-white/30 hover:text-red-400 hover:bg-red-500/5 transition-colors group"
+          className="flex items-center gap-2.5 w-full px-3 py-2 rounded-xl text-xs text-white/55 hover:text-red-400 hover:bg-red-500/5 transition-colors group"
         >
           <LogOut className="w-3.5 h-3.5 group-hover:text-red-400 transition-colors" />
           Sign Out

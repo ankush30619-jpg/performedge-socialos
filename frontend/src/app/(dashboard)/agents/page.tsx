@@ -604,6 +604,11 @@ export default function AgentsPage() {
             />
           )}
 
+          {/* Inline Strategy Viewer — shows growth strategy without needing to open PPT */}
+          {pipelineDone && activeRun?.strategyJson && (
+            <StrategyViewer strategy={activeRun.strategyJson} />
+          )}
+
           {/* Generated Files — all PPT/Excel from every run for this brand */}
           <GeneratedFilesPanel runs={pastRuns} />
 
@@ -742,12 +747,12 @@ function FollowerGoalCalculator({
             />
           ))}
         </div>
-        {/* Milestone labels */}
+        {/* Milestone labels — show raw number under 1 000, else NNK */}
         <div className="grid grid-cols-5 text-[9px] text-white/25 mt-1">
           <span />
-          <span className="text-center">{(m25 / 1000).toFixed(1)}K</span>
-          <span className="text-center">{(m50 / 1000).toFixed(1)}K</span>
-          <span className="text-center">{(m75 / 1000).toFixed(1)}K</span>
+          <span className="text-center">{m25 >= 1000 ? `${(m25/1000).toFixed(1)}K` : m25}</span>
+          <span className="text-center">{m50 >= 1000 ? `${(m50/1000).toFixed(1)}K` : m50}</span>
+          <span className="text-center">{m75 >= 1000 ? `${(m75/1000).toFixed(1)}K` : m75}</span>
           <span />
         </div>
       </div>
@@ -1302,6 +1307,268 @@ function GeneratedFilesPanel({ runs }: { runs: RunLike[] }) {
               </a>
             );
           })}
+        </div>
+      )}
+    </GlassCard>
+  );
+}
+
+// ── Inline Strategy Viewer ────────────────────────────────────────────────────
+// Shows the most important fields from strategyJson directly in the UI so the
+// social media manager doesn't need to download the PPT to read the strategy.
+
+type StrategyJsonShape = {
+  pillars?: string[];
+  posting_frequency?: string;
+  content_mix?: Record<string, number>;
+  growth_tactics?: string[];
+  hook_strategy?: string[];
+  cta_templates?: string[];
+  what_works?: string[];
+  what_to_stop?: string[];
+  hashtag_strategy?: string;
+  best_times?: string[];
+  follower_plan?: Record<string, number>;
+  viral_opportunities?: string[];
+  engagement_tactics?: string[];
+  [k: string]: unknown;
+};
+
+function StrategyViewer({ strategy }: { strategy: Record<string, unknown> }) {
+  const [expanded, setExpanded] = useState(false);
+  const s = strategy as StrategyJsonShape;
+
+  const pillars       = (s.pillars ?? []).slice(0, 6);
+  const tactics       = (s.growth_tactics ?? []).slice(0, 5);
+  const hooks         = (s.hook_strategy ?? []).slice(0, 4);
+  const ctas          = (s.cta_templates ?? []).slice(0, 3);
+  const whatWorks     = (s.what_works ?? []).slice(0, 4);
+  const whatToStop    = (s.what_to_stop ?? []).slice(0, 3);
+  const viral         = (s.viral_opportunities ?? []).slice(0, 3);
+  const bestTimes     = (s.best_times ?? []).slice(0, 3);
+  const cm            = s.content_mix ?? {};
+  const followerPlan  = s.follower_plan ?? {};
+
+  if (!pillars.length && !tactics.length) return null;
+
+  const PILLAR_COLORS = [
+    "bg-purple-500/15 border-purple-500/30 text-purple-300",
+    "bg-blue-500/15 border-blue-500/30 text-blue-300",
+    "bg-emerald-500/15 border-emerald-500/30 text-emerald-300",
+    "bg-amber-500/15 border-amber-500/30 text-amber-300",
+    "bg-pink-500/15 border-pink-500/30 text-pink-300",
+    "bg-cyan-500/15 border-cyan-500/30 text-cyan-300",
+  ];
+
+  return (
+    <GlassCard className="p-5">
+      <button
+        onClick={() => setExpanded(v => !v)}
+        className="flex items-center justify-between w-full"
+        aria-expanded={expanded}
+        aria-controls="strategy-viewer-body"
+      >
+        <div className="flex items-center gap-2">
+          <TrendingUp className="w-4 h-4 text-brand-light" />
+          <h2 className="font-semibold text-white text-sm">Growth Strategy</h2>
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-brand/10 border border-brand/20 text-brand-light">
+            Inline Preview
+          </span>
+          {s.posting_frequency && (
+            <span className="text-[10px] text-white/40 ml-1">{s.posting_frequency}</span>
+          )}
+        </div>
+        {expanded
+          ? <ChevronUp className="w-4 h-4 text-white/40" />
+          : <ChevronDown className="w-4 h-4 text-white/40" />}
+      </button>
+
+      {!expanded && (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {pillars.slice(0, 4).map((p, i) => (
+            <span key={i} className={`text-[10px] px-2 py-0.5 rounded-full border ${PILLAR_COLORS[i % PILLAR_COLORS.length]}`}>
+              {typeof p === "string" ? p : String(p)}
+            </span>
+          ))}
+          {pillars.length > 4 && (
+            <span className="text-[10px] text-white/30">+{pillars.length - 4} more</span>
+          )}
+        </div>
+      )}
+
+      {expanded && (
+        <div id="strategy-viewer-body" className="mt-4 space-y-5">
+
+          {/* Content Pillars */}
+          {pillars.length > 0 && (
+            <div>
+              <p className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-2">Content Pillars</p>
+              <div className="flex flex-wrap gap-2">
+                {pillars.map((p, i) => (
+                  <span key={i} className={`text-xs px-3 py-1 rounded-full border font-medium ${PILLAR_COLORS[i % PILLAR_COLORS.length]}`}>
+                    {typeof p === "string" ? p : String(p)}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-4">
+            {/* Content Mix */}
+            {Object.keys(cm).length > 0 && (
+              <div>
+                <p className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-2">Content Mix</p>
+                <div className="space-y-1.5">
+                  {Object.entries(cm).map(([type, pct]) => (
+                    <div key={type} className="flex items-center gap-2">
+                      <span className="text-xs text-white/60 w-20 truncate">{type}</span>
+                      <div className="flex-1 h-1.5 bg-white/[0.08] rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-brand rounded-full"
+                          style={{ width: `${Math.min(100, Number(pct) || 0)}%` }}
+                        />
+                      </div>
+                      <span className="text-[10px] text-brand-light w-8 text-right">{pct}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Best Posting Times */}
+            {bestTimes.length > 0 && (
+              <div>
+                <p className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-2">Best Posting Times</p>
+                <div className="space-y-1">
+                  {bestTimes.map((t, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <Clock className="w-3 h-3 text-brand-light flex-shrink-0" />
+                      <span className="text-xs text-white/60">{typeof t === "string" ? t : String(t)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Growth Tactics */}
+          {tactics.length > 0 && (
+            <div>
+              <p className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-2">Top Growth Tactics</p>
+              <ol className="space-y-2">
+                {tactics.map((t, i) => (
+                  <li key={i} className="flex gap-2.5 text-xs text-white/70 leading-relaxed">
+                    <span className="w-5 h-5 rounded-full bg-brand/20 text-brand-light text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
+                      {i + 1}
+                    </span>
+                    <span>{typeof t === "string" ? t : String(t)}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-4">
+            {/* What's Working */}
+            {whatWorks.length > 0 && (
+              <div>
+                <p className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-2">What&apos;s Working</p>
+                <ul className="space-y-1">
+                  {whatWorks.map((w, i) => (
+                    <li key={i} className="text-xs text-white/65 flex gap-1.5 leading-snug">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-400 flex-shrink-0 mt-0.5" />
+                      <span>{typeof w === "string" ? w : String(w)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* What to Stop */}
+            {whatToStop.length > 0 && (
+              <div>
+                <p className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-2">Stop Doing This</p>
+                <ul className="space-y-1">
+                  {whatToStop.map((w, i) => (
+                    <li key={i} className="text-xs text-white/65 flex gap-1.5 leading-snug">
+                      <span className="w-3 h-3 rounded-full bg-red-400/20 border border-red-400/40 flex-shrink-0 mt-0.5" />
+                      <span>{typeof w === "string" ? w : String(w)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+
+          {/* Hook Templates */}
+          {hooks.length > 0 && (
+            <div>
+              <p className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-2">Hook Templates</p>
+              <div className="space-y-1.5">
+                {hooks.map((h, i) => (
+                  <div key={i} className="px-3 py-2 rounded-lg bg-dark-base/60 border border-white/[0.05] text-xs text-white/65 leading-snug font-mono">
+                    &ldquo;{typeof h === "string" ? h : String(h)}&rdquo;
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* CTA Templates */}
+          {ctas.length > 0 && (
+            <div>
+              <p className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-2">CTA Templates</p>
+              <div className="flex flex-wrap gap-2">
+                {ctas.map((c, i) => (
+                  <span key={i} className="text-xs px-2.5 py-1 rounded-full bg-brand/10 border border-brand/20 text-brand-light">
+                    {typeof c === "string" ? c : String(c)}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Viral Opportunities */}
+          {viral.length > 0 && (
+            <div>
+              <p className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-2">Viral Content Opportunities</p>
+              <ul className="space-y-1">
+                {viral.map((v, i) => (
+                  <li key={i} className="flex gap-2 text-xs text-white/65 leading-snug">
+                    <span className="text-yellow-400">⚡</span>
+                    <span>{typeof v === "string" ? v : String(v)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Follower Plan milestones */}
+          {Object.keys(followerPlan).length > 0 && (
+            <div>
+              <p className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-2">Follower Plan Milestones</p>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(followerPlan).map(([key, val]) => (
+                  <div key={key} className="px-3 py-2 rounded-xl bg-dark-base/60 border border-white/[0.06] text-center">
+                    <p className="text-sm font-bold text-brand-light">{typeof val === "number" ? val.toLocaleString() : String(val)}</p>
+                    <p className="text-[10px] text-white/30 capitalize mt-0.5">{key.replace(/_/g, " ")}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Hashtag strategy */}
+          {s.hashtag_strategy && (
+            <div>
+              <p className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-1.5">Hashtag Strategy</p>
+              <p className="text-xs text-white/55 leading-relaxed">{String(s.hashtag_strategy)}</p>
+            </div>
+          )}
+
+          <p className="text-[10px] text-white/25 italic">
+            Full 22-slide deck available above · Strategy generated from live Instagram data + market research
+          </p>
         </div>
       )}
     </GlassCard>

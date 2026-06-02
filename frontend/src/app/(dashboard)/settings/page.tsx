@@ -1,6 +1,5 @@
 "use client";
 import { useState } from "react";
-// Auth bypass — useSession replaced with mock
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { GlassCard } from "@/components/ui/GlassCard";
@@ -22,8 +21,19 @@ type NotifPrefs = {
 };
 
 export default function SettingsPage() {
-  // Auth bypass — mock user
-  const user = { name: "Dev User", email: "dev@socialos.local" };
+  // Fetch real user from backend; gracefully fall back to a safe default
+  const { data: meData } = useQuery({
+    queryKey: ["me"],
+    queryFn: () => api.get("/api/auth/me").then((r) => r.data),
+    staleTime: 120_000,
+    retry: false,
+  });
+  const rawUser = meData?.user ?? meData;
+  const user = {
+    name:  (rawUser?.name  || rawUser?.email?.split("@")?.[0] || "Admin") as string,
+    email: (rawUser?.email || "—") as string,
+    role:  (rawUser?.role  || "admin") as string,
+  };
 
   // ── Password change ────────────────────────────────────────────────────────
   const [pwForm, setPwForm] = useState({ current: "", newPw: "", confirm: "" });
@@ -75,14 +85,15 @@ export default function SettingsPage() {
 
   // ── Integration status list ────────────────────────────────────────────────
   const INTEGRATIONS = [
-    { icon: Zap,       name: "OpenAI GPT-4o",     env: "OPENAI_API_KEY",           desc: "Strategist · Copywriter · Analyst",  docsUrl: "https://platform.openai.com/api-keys" },
-    { icon: Globe,     name: "Tavily Search",      env: "TAVILY_API_KEY",           desc: "Research Agent trend discovery",     docsUrl: "https://tavily.com" },
-    { icon: Globe,     name: "NewsAPI",             env: "NEWS_API_KEY",             desc: "Industry news for research agent",   docsUrl: "https://newsapi.org/account" },
-    { icon: ImageIcon, name: "Freepik Mystic",      env: "FREEPIK_API_KEY",          desc: "AI image generation for designs",    docsUrl: "https://www.freepik.com/api" },
-    { icon: Database,  name: "Supabase Storage",    env: "SUPABASE_SERVICE_ROLE_KEY",desc: "File uploads, logos, guidelines",    docsUrl: "https://supabase.com/dashboard/project/_/settings/api" },
-    { icon: Zap,       name: "Upstash Redis",       env: "REDIS_URL",               desc: "BullMQ job queue & scheduling",      docsUrl: "https://console.upstash.com" },
-    { icon: Shield,    name: "Meta / Facebook App", env: "META_APP_ID",             desc: "Instagram OAuth & publishing",       docsUrl: "https://developers.facebook.com/apps" },
-    { icon: Server,    name: "Neon PostgreSQL",     env: "DATABASE_URL",            desc: "Primary database (Prisma ORM)",      docsUrl: "https://console.neon.tech" },
+    { icon: Brain,     name: "OpenAI GPT-5",        env: "OPENAI_API_KEY",           desc: "Brain tier — Strategist · Growth Planner · Copywriter",  docsUrl: "https://platform.openai.com/api-keys" },
+    { icon: Zap,       name: "Groq (llama-3.3-70b)",env: "GROQ_API_KEY",             desc: "Fast tier — Analyst · Competitor · Research",             docsUrl: "https://console.groq.com/keys" },
+    { icon: Globe,     name: "Tavily Search",        env: "TAVILY_API_KEY",           desc: "Research Agent trend discovery",                          docsUrl: "https://tavily.com" },
+    { icon: Globe,     name: "NewsAPI",              env: "NEWS_API_KEY",             desc: "Industry news for research agent",                        docsUrl: "https://newsapi.org/account" },
+    { icon: ImageIcon, name: "Freepik Mystic",       env: "FREEPIK_API_KEY",          desc: "AI image generation for designs",                         docsUrl: "https://www.freepik.com/api" },
+    { icon: Database,  name: "Supabase Storage",     env: "SUPABASE_SERVICE_ROLE_KEY",desc: "File uploads, logos, guidelines",                         docsUrl: "https://supabase.com/dashboard/project/_/settings/api" },
+    { icon: Zap,       name: "Upstash Redis",        env: "REDIS_URL",                desc: "BullMQ job queue & scheduling",                           docsUrl: "https://console.upstash.com" },
+    { icon: Shield,    name: "Meta / Facebook App",  env: "META_APP_ID",              desc: "Instagram OAuth & publishing",                            docsUrl: "https://developers.facebook.com/apps" },
+    { icon: Server,    name: "Neon PostgreSQL",      env: "DATABASE_URL",             desc: "Primary database (Prisma ORM)",                           docsUrl: "https://console.neon.tech" },
   ];
 
   const [copied, setCopied] = useState<string | null>(null);
@@ -118,8 +129,8 @@ export default function SettingsPage() {
                 <p className="font-semibold text-white">{user?.name ?? "Admin"}</p>
                 <p className="text-sm text-white/40">{user?.email}</p>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className="text-[10px] bg-brand/20 text-brand-light border border-brand/30 rounded-full px-2 py-0.5 font-medium">
-                    Admin
+                  <span className="text-[10px] bg-brand/20 text-brand-light border border-brand/30 rounded-full px-2 py-0.5 font-medium capitalize">
+                    {user.role}
                   </span>
                   <span className="text-[10px] bg-green-500/10 text-green-400 border border-green-500/20 rounded-full px-2 py-0.5 font-medium flex items-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
@@ -386,7 +397,9 @@ export default function SettingsPage() {
                 ["Platform",  "SocialOS v1.0"],
                 ["Frontend",  "Next.js 15 + React 18"],
                 ["Backend",   "Fastify 5 + BullMQ"],
-                ["Agents",    "LangGraph + GPT-4o"],
+                ["Brain LLM", "OpenAI GPT-5"],
+                ["Fast LLM",  "Groq llama-3.3-70b"],
+                ["Agents",    "LangGraph + GPT-5 / Groq"],
                 ["Database",  "Neon PostgreSQL"],
                 ["Queue",     "BullMQ + Upstash Redis"],
                 ["Storage",   "Supabase Storage"],

@@ -68,7 +68,7 @@ export default function DesignerPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Designer Studio</h1>
-          <p className="text-sm text-white/40 mt-0.5">
+          <p className="text-sm text-white/60 mt-0.5">
             {activeBrand
               ? `${activeBrand.name} · AI-generated visuals · Freepik Mystic`
               : "Select a brand to view designs"}
@@ -186,27 +186,31 @@ export default function DesignerPage() {
                 {/* Hover overlay */}
                 <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
                   <button onClick={(e) => { e.stopPropagation(); setLightboxIdx(idx); }}
-                    className="w-9 h-9 rounded-xl bg-white/10 backdrop-blur-sm flex items-center justify-center hover:bg-white/20 transition-colors" title="Preview">
+                    aria-label={`Preview ${asset.contentType}: ${asset.topic ?? "design asset"}`}
+                    className="w-9 h-9 rounded-xl bg-black/70 flex items-center justify-center hover:bg-black/90 transition-colors" title="Preview">
                     <ZoomIn className="w-4 h-4 text-white" />
                   </button>
                   <a href={asset.imageUrl} target="_blank" rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
-                    className="w-9 h-9 rounded-xl bg-white/10 backdrop-blur-sm flex items-center justify-center hover:bg-white/20 transition-colors" title="Open original">
+                    aria-label={`Open original ${asset.contentType} in new tab`}
+                    className="w-9 h-9 rounded-xl bg-black/70 flex items-center justify-center hover:bg-black/90 transition-colors" title="Open original">
                     <ExternalLink className="w-4 h-4 text-white" />
                   </a>
                   <a href={asset.imageUrl} download={`${asset.contentType}-${asset.id}.jpg`}
                     onClick={(e) => e.stopPropagation()}
-                    className="w-9 h-9 rounded-xl bg-white/10 backdrop-blur-sm flex items-center justify-center hover:bg-white/20 transition-colors" title="Download">
+                    aria-label={`Download ${asset.contentType} image`}
+                    className="w-9 h-9 rounded-xl bg-black/70 flex items-center justify-center hover:bg-black/90 transition-colors" title="Download">
                     <Download className="w-4 h-4 text-white" />
                   </a>
                 </div>
 
-                {/* Content type badge */}
+                {/* Content type badge — dark bg ensures WCAG AA contrast for white text */}
                 <div className="absolute top-2 left-2">
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium backdrop-blur-sm"
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold"
                     style={{
-                      backgroundColor: `${CONTENT_TYPE_COLORS[asset.contentType] ?? "#6C3CE1"}cc`,
-                      color: "white",
+                      backgroundColor: "rgba(0,0,0,0.72)",
+                      color: CONTENT_TYPE_COLORS[asset.contentType] ?? "#A78BFA",
+                      border: `1px solid ${CONTENT_TYPE_COLORS[asset.contentType] ?? "#6C3CE1"}60`,
                     }}>
                     {asset.contentType}
                   </span>
@@ -229,6 +233,7 @@ export default function DesignerPage() {
                   <div className="flex items-start justify-between mt-1 gap-1">
                     <p className="text-[10px] text-white/30 line-clamp-2 italic flex-1">{asset.prompt}</p>
                     <button onClick={() => copyPrompt(asset.prompt!, asset.id)}
+                      aria-label="Copy image generation prompt"
                       className="p-0.5 hover:text-brand-light text-white/20 transition-colors flex-shrink-0" title="Copy prompt">
                       {copied === asset.id ? <CheckCircle2 className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
                     </button>
@@ -244,7 +249,7 @@ export default function DesignerPage() {
             <Paintbrush className="w-7 h-7 text-brand-light" />
           </div>
           <h2 className="text-lg font-semibold text-white mb-2">No designs yet</h2>
-          <p className="text-sm text-white/40 max-w-xs mb-5">
+          <p className="text-sm text-white/60 max-w-xs mb-5">
             Run the full agent pipeline to generate AI visuals with your brand style
           </p>
           <Link href="/agents" className="btn-primary text-sm">Run Agents Now</Link>
@@ -257,14 +262,16 @@ export default function DesignerPage() {
           onClick={() => setLightboxIdx(null)}>
           {/* Close */}
           <button onClick={() => setLightboxIdx(null)}
-            className="absolute top-4 right-4 w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors z-10">
+            aria-label="Close image preview"
+            className="absolute top-4 right-4 w-10 h-10 rounded-xl bg-black/70 flex items-center justify-center hover:bg-black/90 transition-colors z-10">
             <X className="w-5 h-5 text-white" />
           </button>
 
           {/* Prev */}
           {filtered.length > 1 && (
             <button onClick={(e) => { e.stopPropagation(); lightboxPrev(); }}
-              className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors z-10">
+              aria-label="Previous image"
+              className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-xl bg-black/70 flex items-center justify-center hover:bg-black/90 transition-colors z-10">
               <ChevronLeft className="w-5 h-5 text-white" />
             </button>
           )}
@@ -308,7 +315,8 @@ export default function DesignerPage() {
           {/* Next */}
           {filtered.length > 1 && (
             <button onClick={(e) => { e.stopPropagation(); lightboxNext(); }}
-              className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors z-10">
+              aria-label="Next image"
+              className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-xl bg-black/70 flex items-center justify-center hover:bg-black/90 transition-colors z-10">
               <ChevronRight className="w-5 h-5 text-white" />
             </button>
           )}

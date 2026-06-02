@@ -29,12 +29,21 @@ test.describe("Designer Page — Basic Smoke", () => {
     await page.goto("/designer");
     await page.waitForLoadState("networkidle").catch(() => {});
 
-    const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
+    const results = await new AxeBuilder({ page })
+      .withTags(["wcag2a", "wcag2aa"])
+      // Exclude interactive elements that are only visible on hover (opacity-0) —
+      // axe scans the full DOM including visually hidden items. The hidden overlay
+      // buttons are inaccessible by design (keyboard users use the lightbox instead).
+      .exclude("[class*='opacity-0']")
+      .analyze();
+
     const critical = results.violations.filter((v) => v.impact === "critical" || v.impact === "serious");
     if (critical.length > 0) {
-      const summary = critical.map((v) => `[${v.impact}] ${v.id}: ${v.description}`).join("\n");
-      console.warn(`a11y warnings on /designer (non-blocking):\n${summary}`);
+      const summary = critical.map((v) =>
+        `[${v.impact}] ${v.id}: ${v.description}\n  Nodes: ${v.nodes.map(n => n.html).join(", ")}`
+      ).join("\n");
+      console.error(`WCAG violations on /designer:\n${summary}`);
     }
-    // Soft assertion: log but don't fail on designer a11y (it's complex UI)
+    expect(critical, `${critical.length} critical/serious WCAG violation(s) found`).toHaveLength(0);
   });
 });

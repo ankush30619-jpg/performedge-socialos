@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useActiveBrand } from "@/store/useAppStore";
 import { useQuery } from "@tanstack/react-query";
-import { instagramAPI } from "@/lib/api";
+import { instagramAPI, api } from "@/lib/api";
 import { Bell, Search, Instagram, Wifi, WifiOff, X } from "lucide-react";
 import { getInitials } from "@/lib/utils";
 
@@ -10,8 +10,19 @@ type Notif = { id: string; msg: string; time: string; type: "success" | "error" 
 
 export function TopBar() {
   const activeBrand = useActiveBrand();
-  // Auth bypass — mock session user
-  const mockUser = { name: "Dev User", email: "dev@socialos.local" };
+
+  // Fetch real session user from backend; safe fallback for unauthenticated state
+  const { data: meData } = useQuery({
+    queryKey: ["me-topbar"],
+    queryFn: () => api.get("/api/auth/me").then((r) => r.data),
+    staleTime: 300_000,
+    retry: false,
+  });
+  const rawUser  = meData?.user ?? meData;
+  const mockUser = {
+    name:  (rawUser?.name  || rawUser?.email?.split("@")?.[0] || "Admin") as string,
+    email: (rawUser?.email || "—") as string,
+  };
   const [showNotifs, setShowNotifs]   = useState(false);
   const [notifs, setNotifs]           = useState<Notif[]>([]);
   const [searchVal, setSearchVal]     = useState("");
@@ -68,7 +79,7 @@ export function TopBar() {
           className="w-full bg-dark-mid/40 border border-white/[0.08] rounded-xl pl-9 pr-4 py-2 text-sm text-white/70 placeholder:text-white/25 focus:outline-none focus:border-brand/40 focus:bg-dark-mid/60 transition-all"
         />
         {searchVal && (
-          <button onClick={() => setSearchVal("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60">
+          <button onClick={() => setSearchVal("")} aria-label="Clear search" className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60">
             <X className="w-3.5 h-3.5" />
           </button>
         )}
@@ -82,7 +93,7 @@ export function TopBar() {
           <div className={`flex items-center gap-2 rounded-full px-3 py-1.5 border text-xs font-medium transition-all
             ${igConnected
               ? "bg-green-500/10 border-green-500/20 text-green-300"
-              : "bg-dark-mid/60 border-white/[0.08] text-white/30"}`}>
+              : "bg-dark-mid/60 border-white/[0.08] text-white/50"}`}>
             {igConnected
               ? <><Wifi className="w-3 h-3" /> {followerCount?.toLocaleString("en-IN") ?? "—"} followers</>
               : <><WifiOff className="w-3 h-3" /> No IG</>}
@@ -110,6 +121,8 @@ export function TopBar() {
         <div className="relative" ref={notifRef}>
           <button
             onClick={() => { setShowNotifs(o => !o); if (!showNotifs) markAllRead(); }}
+            aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ""}`}
+            aria-expanded={showNotifs}
             className="relative w-9 h-9 rounded-xl bg-dark-mid/60 border border-white/[0.08] flex items-center justify-center text-white/50 hover:text-white/80 hover:border-white/[0.15] transition-all"
           >
             <Bell className="w-4 h-4" />
@@ -142,7 +155,7 @@ export function TopBar() {
                         <p className="text-xs text-white/70">{n.msg}</p>
                         <p className="text-[10px] text-white/25 mt-0.5">{n.time}</p>
                       </div>
-                      <button onClick={() => clearNotif(n.id)} className="text-white/20 hover:text-white/50 flex-shrink-0">
+                      <button onClick={() => clearNotif(n.id)} aria-label="Dismiss notification" className="text-white/20 hover:text-white/50 flex-shrink-0">
                         <X className="w-3 h-3" />
                       </button>
                     </div>
@@ -156,9 +169,11 @@ export function TopBar() {
         {/* User avatar */}
         <div
           className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand to-indigo-500 flex items-center justify-center text-xs font-bold text-white cursor-pointer shadow-brand"
-          title={mockUser.email}
+          title={`${mockUser.name} · ${mockUser.email}`}
+          aria-label={`Logged in as ${mockUser.name}`}
+          role="img"
         >
-          {userInitial}
+          {mockUser.name?.[0]?.toUpperCase() ?? "A"}
         </div>
       </div>
     </header>

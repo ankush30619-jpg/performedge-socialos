@@ -10,7 +10,13 @@ const PASSWORD = process.env.TEST_PASSWORD ?? "";
 const CAN_AUTH = Boolean(EMAIL && PASSWORD);
 
 test.describe("Brands Page", () => {
-  test("loads without 5xx (unauthenticated — auth redirect expected)", async ({ page }) => {
+  test("loads without 5xx (unauthenticated — auth redirect expected)", async ({ page }, testInfo) => {
+    // /brands does SSR with Supabase — returns 500 when env vars are absent (local dev without .env.local).
+    // Skip in that case, exactly as smoke.spec.ts does.
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+      testInfo.skip(true, "/brands requires NEXT_PUBLIC_SUPABASE_URL — skipping in env-free local dev");
+      return;
+    }
     const res = await page.goto("/brands");
     await page.waitForLoadState("domcontentloaded");
     const status = res?.status() ?? 200;

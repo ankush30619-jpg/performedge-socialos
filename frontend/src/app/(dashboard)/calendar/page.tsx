@@ -56,7 +56,7 @@ export default function CalendarPage() {
         ? instagramAPI.getPosts(activeBrand.id).then((r) => r.data)
         : Promise.resolve({ posts: [], designAssets: [], igConnected: false }),
     enabled: !!activeBrand,
-    refetchInterval: 5000,
+    refetchInterval: 30_000, // 30s — calendar data doesn't change that fast; was 5s (wasteful)
   });
 
   const posts: Post[]          = data?.posts ?? [];

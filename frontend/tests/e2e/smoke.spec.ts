@@ -30,10 +30,11 @@ test.describe("Smoke — Public Routes", () => {
     });
 
     await page.goto("/auth/login");
+    await page.waitForLoadState("domcontentloaded");
     await expect(page).toHaveURL(/login/);
 
-    // Form elements present
-    await expect(page.locator('input[type="email"]')).toBeVisible();
+    // Form elements present — wait for Suspense boundary to resolve
+    await expect(page.locator('input[type="email"]')).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('input[type="password"]')).toBeVisible();
     await expect(page.locator('button[type="submit"]')).toBeVisible();
 
