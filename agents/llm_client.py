@@ -52,6 +52,11 @@ MODEL_BY_TIER: dict[Tier, str] = {
 # ── Lazy client ───────────────────────────────────────────────────────────────
 _oai: AsyncOpenAI | None = None
 
+# Hard per-call timeout (seconds). Prevents any single LLM call from hanging
+# the pipeline indefinitely. 120s is generous — even large GPT-5 strategy
+# calls complete in 60-90s at reasonable token budgets.
+LLM_TIMEOUT_SEC = int(os.getenv("LLM_TIMEOUT_SEC", "120"))
+
 
 def _get_openai() -> AsyncOpenAI:
     global _oai
@@ -63,7 +68,12 @@ def _get_openai() -> AsyncOpenAI:
             "llm_client: OPENAI_API_KEY not set — required for all tiers. "
             "Add it to Railway env vars or .env."
         )
-    _oai = AsyncOpenAI(api_key=key)
+    # httpx timeout: 10s connect, LLM_TIMEOUT_SEC read — prevents infinite hangs
+    import httpx
+    _oai = AsyncOpenAI(
+        api_key=key,
+        timeout=httpx.Timeout(LLM_TIMEOUT_SEC, connect=10.0),
+    )
     return _oai
 
 
@@ -86,8 +96,12 @@ def _is_gpt5_family(model: str) -> bool:
 # want minimal reasoning + a generous output budget, so:
 #   1) Multiply the caller's max_tokens by this factor to leave room.
 #   2) Pass reasoning_effort="minimal" to keep latency + cost predictable.
-GPT5_TOKEN_MULTIPLIER = 3
-GPT5_MIN_BUDGET       = 8000
+#
+# IMPORTANT: multiplier was 3 — that inflated a 7000-token call to 21,000 tokens
+# causing 8-12 minute hangs. Reduced to 2 (max cap 12,000) for much faster runs.
+GPT5_TOKEN_MULTIPLIER = 2
+GPT5_MIN_BUDGET       = 6000
+GPT5_MAX_BUDGET       = 12000  # hard cap — prevents runaway token consumption
 
 
 async def complete(
@@ -116,8 +130,12 @@ async def complete(
         "messages": messages,
     }
     if is_gpt5:
-        # Inflate the budget so reasoning doesn't starve the output.
-        budget = max(max_tokens * GPT5_TOKEN_MULTIPLIER, GPT5_MIN_BUDGET)
+        # Inflate the budget so reasoning doesn't starve the output,
+        # but cap at GPT5_MAX_BUDGET to prevent 10+ minute hangs.
+        budget = min(
+            max(max_tokens * GPT5_TOKEN_MULTIPLIER, GPT5_MIN_BUDGET),
+            GPT5_MAX_BUDGET,
+        )
         kwargs["max_completion_tokens"] = budget
         # GPT-5 supports reasoning_effort: minimal | low | medium | high.
         # "minimal" optimizes for fast structured output (right for content gen).

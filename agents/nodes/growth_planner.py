@@ -430,7 +430,8 @@ async def _generate_strategy(brand, brand_knowledge, analyst_report, research_da
         if learned_patterns else ""
     )
     try:
-        raw_text = await llm_complete(
+        raw_text = await asyncio.wait_for(
+          llm_complete(
             messages=[
                 {
                     "role": "system",
@@ -617,9 +618,9 @@ async def _generate_strategy(brand, brand_knowledge, analyst_report, research_da
             ],
             tier="brain",
             temperature=0.5,
-            max_tokens=7000,
+            max_tokens=4000,  # was 7000 → GPT-5 inflated to 21k (8-12 min hang); now 4k → 8k budget
             response_json=True,
-        )
+        ), timeout=100)  # hard 100s timeout — prevents infinite hang if OpenAI is slow
         strategy_out = json.loads(raw_text)
         # Ensure KPI targets from analyst flow through to the PPT layer
         if not strategy_out.get("kpi_targets_90day") and analyst_report.get("kpi_targets_90day"):
@@ -627,6 +628,9 @@ async def _generate_strategy(brand, brand_knowledge, analyst_report, research_da
         if not strategy_out.get("launch_roadmap") and analyst_report.get("launch_roadmap"):
             strategy_out["launch_roadmap"] = analyst_report["launch_roadmap"]
         return strategy_out
+    except asyncio.TimeoutError:
+        print("[GrowthPlanner] _generate_strategy timed out after 100s — using fallback strategy")
+        return _fallback_strategy(brand, days_ahead, ig_audit)
     except Exception as e:
         print(f"[GrowthPlanner] GPT strategy error: {e}")
         import traceback; traceback.print_exc()
@@ -664,7 +668,8 @@ async def _generate_extended_plan(
     tactics    = (growth_strategy.get("growth_tactics") or [])[:4]
 
     try:
-        raw_text = await llm_complete(
+        raw_text = await asyncio.wait_for(
+          llm_complete(
             messages=[
                 {
                     "role": "system",
@@ -717,23 +722,25 @@ async def _generate_extended_plan(
                         f"why_it_failed (list of 2-3 specific reasons), "
                         f"what_to_stop (specific pattern to avoid), "
                         f"what_to_do_instead (the better alternative).\n\n"
-                        f"social_media_trends: list of 4 objects — trend (name), why_it_works (mechanism), "
-                        f"how_to_use (specific to {niche}), competitor_using (generic label).\n\n"
-                        f"execution_calendar_30: list of EXACTLY 30 objects for days 1-30 — "
-                        f"day (int), reel_topic (specific to {niche}), carousel_topic (specific to {niche}), "
-                        f"story_topic (1 line), cta (CTA mechanism), goal (e.g. '+5 followers, 10 saves').\n\n"
-                        f"execution_calendar_weeks_5_to_12: list of 8 objects for weeks 5-12 — "
-                        f"week (5-12), theme (1 line), reels (2 topic lines), carousels (1 topic line), "
-                        f"stories (pattern), goal (weekly KPI)."
+                        f"social_media_trends: list of 3 objects — trend (name), why_it_works (mechanism), "
+                        f"how_to_use (specific to {niche}).\n\n"
+                        # Reduced from 30 → 14 days: was the single biggest token hog (30 complex objects
+                        # = ~2000+ tokens output alone), causing 8-12 min hangs on GPT-5.
+                        f"execution_calendar_14: list of 14 objects for days 1-14 — "
+                        f"day (int), reel_topic (specific to {niche}), story_topic (1 line), "
+                        f"goal (e.g. '+5 followers'). Keep each object compact — single-line values only."
                     ),
                 },
             ],
             tier="brain",
             temperature=0.4,
-            max_tokens=5000,
+            max_tokens=2500,  # was 5000 → GPT-5 inflated to 15k; now 2.5k → 6k budget (safe for 3 min)
             response_json=True,
-        )
+        ), timeout=90)  # 90s hard timeout — extended plan is supplementary; skip if slow
         return json.loads(raw_text)
+    except asyncio.TimeoutError:
+        print("[GrowthPlanner] _generate_extended_plan timed out after 90s — continuing without it")
+        return {}
     except Exception as e:
         print(f"[GrowthPlanner] Extended plan GPT error: {e}")
         import traceback; traceback.print_exc()
@@ -1370,10 +1377,10 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
                 txt(s, f"→ {item}", x+Inches(0.12), Inches(1.6+j*0.85), Inches(2.8), Inches(0.78), 10, color=light)
         footer(s, 17)
 
-        # ── Slide 18: 30-Day Execution Plan ──
+        # ── Slide 18: 14-Day Execution Plan (was 30-day; trimmed to avoid 8-12 min LLM hangs) ──
         s = prs.slides.add_slide(blank); bg(s, dark)
-        slide_header(s, "17  ·  30-DAY EXECUTION PLAN", "Day-by-day: what to post, why, and what it achieves.")
-        cal30      = ep.get("execution_calendar_30") or []
+        slide_header(s, "17  ·  14-DAY EXECUTION PLAN", "Day-by-day: what to post, why, and what it achieves.")
+        cal30      = ep.get("execution_calendar_14") or ep.get("execution_calendar_30") or []
         day_plan30 = strategy.get("day_by_day_plan") or []
         source30   = cal30 or day_plan30
         if source30:
