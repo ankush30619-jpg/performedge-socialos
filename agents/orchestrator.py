@@ -516,12 +516,25 @@ class SelfHealingWrapper:
         # 3) Per-agent rules
         if rules_id == "copy_brand_specific_tokens":
             posts = output.get("posts_with_copy") or []
-            # Bug 3 fix: normalize apostrophes before comparison so that
-            # curly-apostrophe brand names (e.g. "Mishika's" U+2019 from DB)
-            # match straight-apostrophe captions (U+0027) and vice-versa.
-            required_tokens = [_normalize_text(t) for t in (brand_name, niche) if t]
+            # Build a wider set of brand-specific tokens beyond just name + niche.
+            # Hinglish captions often use product line names, cities, catchphrases
+            # rather than the exact brand name — all are brand-specific.
+            brand_tokens_raw = [brand_name]
+            # Add brand's differentiation identifiers from the brand dict
+            for field in ("differentiation", "catchphrases", "positioning"):
+                val = brand.get(field) or ""
+                # Split on common delimiters and take first 2 meaningful words per part
+                for part in re.split(r"[|,;\n]", val)[:4]:
+                    word = part.strip().split()[0] if part.strip() else ""
+                    if len(word) >= 4:
+                        brand_tokens_raw.append(word)
+            # Add niche first meaningful word (not "air" which is too generic alone)
+            niche_words = [w for w in (niche or "").split() if len(w) >= 5][:2]
+            brand_tokens_raw.extend(niche_words)
+            # Normalize all tokens
+            required_tokens = list({_normalize_text(t) for t in brand_tokens_raw if t and len(t) >= 4})
             for i, p in enumerate(posts[:6]):  # check first 6 posts
-                caption = _normalize_text(p.get("caption") or "")
+                caption = _normalize_text((p.get("caption") or "") + " " + (p.get("hook") or ""))
                 if required_tokens and not any(t in caption for t in required_tokens):
                     violations.append(f"post {i}: caption missing brand-specific token")
 
