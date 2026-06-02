@@ -113,9 +113,6 @@ async def _generate_calendar(
     top_posts    = analyst_report.get("topPosts", [])
     what_works   = growth_strategy.get("what_works", [])
 
-    if not oai:
-        return _fallback_calendar(name, niche, days_ahead, content_mix, pillars)
-
     # ── Build type distribution ────────────────────────────────────────────
     type_dist = "\n".join(f"- {ct}: {pct}%" for ct, pct in content_mix.items())
 

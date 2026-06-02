@@ -69,6 +69,15 @@ def _get_openai() -> AsyncOpenAI:
 
 # ── Main entry point ──────────────────────────────────────────────────────────
 
+def _is_gpt5_family(model: str) -> bool:
+    """GPT-5 and reasoning-family models have different API constraints:
+       - Use `max_completion_tokens` instead of `max_tokens`.
+       - `temperature` only accepts the default (1.0); custom values rejected.
+    """
+    m = (model or "").lower()
+    return m.startswith("gpt-5") or m.startswith("o1") or m.startswith("o3")
+
+
 async def complete(
     *,
     messages: list[dict],
@@ -80,17 +89,28 @@ async def complete(
 ) -> str:
     """Run a completion against the model bound to `tier`. Returns raw text.
 
-    `response_json=True` requests JSON-mode output.
+    `response_json=True` requests JSON-mode output. The function transparently
+    adapts to GPT-5-family API differences (max_completion_tokens, fixed
+    temperature) so callers can use one signature for all tiers.
     """
     oai = _get_openai()
     model = model_override or MODEL_BY_TIER[tier]
+    is_gpt5 = _is_gpt5_family(model)
 
     kwargs: dict = {
-        "model":       model,
-        "messages":    messages,
-        "temperature": temperature,
-        "max_tokens":  max_tokens,
+        "model":    model,
+        "messages": messages,
     }
+    # max_tokens parameter name + cap differ between families
+    if is_gpt5:
+        kwargs["max_completion_tokens"] = max_tokens
+        # GPT-5 / o-series only accept default temperature (1.0). Silently
+        # drop a custom temperature rather than erroring — callers shouldn't
+        # have to special-case the tier.
+    else:
+        kwargs["max_tokens"]  = max_tokens
+        kwargs["temperature"] = temperature
+
     if response_json:
         kwargs["response_format"] = {"type": "json_object"}
 
