@@ -74,9 +74,19 @@ class RelearnRequest(BaseModel):
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
+# BUILD_MARKER bumped on every code change so we can verify Railway deployed the latest commit.
+# Format: <commit-short-sha>-<bug-area>. The /health endpoint echoes it.
+BUILD_MARKER = "b74643a+slide-prefix-strip-and-60day"
+
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "socialos-agents", "ts": datetime.utcnow().isoformat()}
+    return {
+        "status": "ok",
+        "service": "socialos-agents",
+        "build":   BUILD_MARKER,
+        "git_sha": os.getenv("RAILWAY_GIT_COMMIT_SHA", "")[:8],
+        "ts":      datetime.utcnow().isoformat(),
+    }
 
 
 # ── Manager health (rich, for the dashboard) ──────────────────────────────────
