@@ -1199,7 +1199,11 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
             txt(s, comp_names_str, Inches(2.8), Inches(1.1), Inches(6.8), Inches(0.3), 9, color=light)
         diff_strat = cd.get("differentiation_strategy") or ""
         if diff_strat:
-            txt(s, f'"{str(diff_strat)[:180]}"', Inches(0.4), Inches(1.58 if comps_found else 1.08), Inches(9.2), Inches(0.38), 9, color=grey, italic=True)
+            _ds = str(diff_strat).strip()
+            # Smart truncate at word boundary with ellipsis to avoid mid-word cuts
+            if len(_ds) > 175:
+                _ds = _ds[:175].rsplit(" ", 1)[0] + "…"
+            txt(s, f'"{_ds}"', Inches(0.4), Inches(1.58 if comps_found else 1.08), Inches(9.2), Inches(0.38), 9, color=grey, italic=True)
         comp_adv    = strategy.get("competitor_advantage") or []
         comp_gaps9  = cd.get("content_gaps") or cd.get("gaps_to_fill") or []
         formats_own = cd.get("content_formats_to_own") or []
@@ -1293,18 +1297,30 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
                 "day90":  {"best": _proj(13,_acl*1.3),"realistic": _proj(13,_acl*0.9),"worst": _proj(13,_acl*0.5)},
                 "day180": {"best": _proj(26,_acl*1.3),"realistic": _proj(26,_acl*0.9),"worst": _proj(26,_acl*0.5)},
                 "assumptions": [
-                    f"Estimate: posting at {strategy.get('posting_frequency','1-2x/day')} consistently",
-                    f"Assumption: ER stays at {_er_val or '1.5-3'}% with quality content",
-                    f"Estimate: acceleration of {_acl}x required vs. current pace",
+                    f"Posting at {strategy.get('posting_frequency','1-2x/day')} consistently",
+                    f"ER stays at {_er_val or '1.5-3'}% with quality content",
+                    f"Acceleration of {_acl}x required vs. current pace",
                 ],
             }
         txt(s, "All values below are ESTIMATES based on current trajectory + proposed strategy changes, not measured data.",
             Inches(0.4), Inches(0.95), Inches(9.2), Inches(0.22), 8, color=amber, italic=True)
         assumptions = gf.get("assumptions") or [
-            f"Estimate: consistent posting at {strategy.get('posting_frequency','1x daily')} required",
-            f"Assumption: ER maintained at {avg_er}% or above",
-            f"Assumption: algorithm reach improves with {feas.get('required_weekly_growth',5)} new followers/week",
+            f"Consistent posting at {strategy.get('posting_frequency','1x daily')} required",
+            f"ER maintained at {avg_er or '~2.5'}% or above",
+            f"Algorithm reach improves with {feas.get('required_weekly_growth',5)} new followers/week",
         ]
+        # Strip GPT data-quality prefixes so user never sees "Estimate:" / "Assumption:" labels
+        # (the slide subtitle + footer already make data-confidence clear)
+        def _strip_meta_prefix(s_val: str) -> str:
+            v = str(s_val or "").strip()
+            for p in ("estimate:", "estimate -", "assumption:", "assumption -",
+                      "current tactics:", "current tactic:", "data:", "fact:",
+                      "evidence:", "note:", "source:"):
+                if v.lower().startswith(p):
+                    v = v[len(p):].strip()
+                    break
+            return v
+        assumptions = [_strip_meta_prefix(a) for a in assumptions]
         bar(s, Inches(0.3), Inches(1.22), Inches(9.4), Inches(0.38), RGBColor(0x1A,0x10,0x35))
         for ci, lbl in enumerate(["SCENARIO","30 DAYS","60 DAYS","90 DAYS","180 DAYS"]):
             txt(s, lbl, Inches(0.4+ci*1.87), Inches(1.28), Inches(1.82), Inches(0.28), 8, bold=True, color=accent)
@@ -1401,23 +1417,27 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         _30d_fallback = [f"Creator swap with a local {niche} technician — 2 posts/week",
                          f"Dealer acquisition Live + carousel funnel",
                          f"Paid boost A/B test on top 2 Reels"]
+        _60d_fallback = [f"Second creator collab (different city/segment) for cross-pollination",
+                         f"UGC compilation Reel from first 60 days of customer wins",
+                         f"Carousel library expansion: room-size, pricing, comparison guides"]
         _90d_fallback = [f"Weekly {niche} signature series — authority content",
                          f"UGC library build with city tags and permissions",
                          f"6-month anniversary compilation Reel + pinned profile refresh"]
         horizons  = [
             ("QUICK WINS (1-7 DAYS)", brand_color, roadmap_d.get("quick_wins") or _tactics[:3] or _qw_fallback),
             ("30 DAYS",               green,        roadmap_d.get("short_term") or _tactics[2:5] or _30d_fallback),
-            ("90 DAYS",               accent,       roadmap_d.get("mid_term")   or _themes[:3] or _90d_fallback),
+            ("60 DAYS",               amber,        roadmap_d.get("mid_short")  or _themes[:2] or _60d_fallback),
+            ("90 DAYS",               accent,       roadmap_d.get("mid_term")   or _themes[1:4] or _90d_fallback),
         ]
         y14 = Inches(1.72) if narrative14 else Inches(1.2)
         for i, (title, col, items) in enumerate(horizons):
-            x = Inches(0.3+i*3.2)
-            bar(s, x, y14, Inches(3.0), Inches(3.3), mid_dark)
-            bar(s, x, y14, Inches(3.0), Inches(0.05), col)
-            txt(s, title, x+Inches(0.12), y14+Inches(0.1), Inches(2.8), Inches(0.32), 8, color=col, bold=True)
+            x = Inches(0.3+i*2.4)
+            bar(s, x, y14, Inches(2.25), Inches(3.3), mid_dark)
+            bar(s, x, y14, Inches(2.25), Inches(0.05), col)
+            txt(s, title, x+Inches(0.1), y14+Inches(0.1), Inches(2.1), Inches(0.32), 8, color=col, bold=True)
             for j, item in enumerate(items[:4] if isinstance(items,list) else [items]):
-                action = str(item.get("action","") if isinstance(item,dict) else item)[:58]
-                txt(s, f"→ {action}", x+Inches(0.12), y14+Inches(0.5+j*0.65), Inches(2.8), Inches(0.58), 10, color=light)
+                action = str(item.get("action","") if isinstance(item,dict) else item)[:62]
+                txt(s, f"→ {action}", x+Inches(0.1), y14+Inches(0.5+j*0.65), Inches(2.1), Inches(0.62), 9, color=light)
         footer(s, 14)
 
         # ── Slide 15: Recommendations with Evidence ──
@@ -1442,10 +1462,21 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
             tline    = str(rec.get("timeline",""))
             impact   = str(rec.get("expected_impact",""))[:60]
             priority = str(rec.get("priority",""))
+            # Strip GPT meta-prefixes so the slide reads as clean evidence, not raw GPT data tags
+            def _strip_pref(t: str) -> str:
+                v = str(t or "").strip()
+                for p in ("estimate:", "estimate -", "assumption:", "assumption -",
+                          "current tactics:", "current tactic:", "data:", "fact:",
+                          "note:", "source:", "evidence:"):
+                    if v.lower().startswith(p):
+                        v = v[len(p):].strip()
+                        break
+                return v
             # Line 1: title
             txt(s, title_r, Inches(0.55), y+Inches(0.06), Inches(8.4), Inches(0.28), 11, bold=True, color=white)
             # Line 2: evidence (primary)
-            evid1 = str(evidence[0])[:100] if evidence else ""
+            evid1 = _strip_pref(str(evidence[0]))[:100] if evidence else ""
+            impact = _strip_pref(impact)[:60]
             if evid1:
                 txt(s, f"Evidence: {evid1}", Inches(0.55), y+Inches(0.35), Inches(8.6), Inches(0.2), 8, color=light, italic=True)
             # Line 3: impact + timeline + priority + difficulty
@@ -1544,11 +1575,18 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
                     dy = Inches(1.62+j*0.69)
                     bar(s, x+Inches(0.05), dy, Inches(2.88), Inches(0.63), RGBColor(0x1A,0x10,0x35))
                     dn = day.get("day", i*5+j+1)
-                    rt = str(day.get("reel_topic","") or day.get("content_task",""))[:42]
-                    g  = str(day.get("goal","") or day.get("kpi_target",""))[:28]
+                    _rt_full = str(day.get("reel_topic","") or day.get("content_task",""))
+                    _g_full  = str(day.get("goal","") or day.get("kpi_target",""))
+                    # Smart truncate: cut at word boundary if too long
+                    def _smart_cut(t: str, lim: int) -> str:
+                        if len(t) <= lim: return t
+                        cut = t[:lim].rsplit(" ", 1)[0]
+                        return (cut or t[:lim]) + "…"
+                    rt = _smart_cut(_rt_full, 56)
+                    g  = _smart_cut(_g_full,  34)
                     txt(s, f"Day {dn}", x+Inches(0.12), dy+Inches(0.05), Inches(0.7), Inches(0.22), 8, color=col, bold=True)
-                    txt(s, rt, x+Inches(0.12), dy+Inches(0.26), Inches(2.65), Inches(0.2), 8, color=light)
-                    txt(s, g,  x+Inches(0.12), dy+Inches(0.46), Inches(2.65), Inches(0.15), 7, color=grey)
+                    txt(s, rt, x+Inches(0.12), dy+Inches(0.26), Inches(2.75), Inches(0.2), 7, color=light)
+                    txt(s, g,  x+Inches(0.12), dy+Inches(0.46), Inches(2.75), Inches(0.15), 7, color=grey)
         else:
             for j, t in enumerate((strategy.get("growth_tactics") or [])[:5]):
                 txt(s, f"Week {j+1}: {str(t)[:100]}", Inches(0.4), Inches(1.5+j*0.72), Inches(9.2), Inches(0.65), 11, color=light)
@@ -1562,10 +1600,23 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         wk_cols    = [brand_color, green, accent, amber]
         def _wk_str(val, maxlen=80):
             """Convert a week plan field to a clean display string.
-            Handles both string and list values (GPT returns both)."""
+            Handles list, str-encoded-list, dict, and string values robustly."""
             if isinstance(val, list):
                 return (" · ".join(str(v) for v in val))[:maxlen]
-            return str(val or "")[:maxlen]
+            if isinstance(val, dict):
+                # GPT sometimes returns {"theme": "..."} objects — extract value
+                return str(next(iter(val.values()), ""))[:maxlen]
+            s = str(val or "").strip()
+            # Defensive: if GPT serialized a Python list as text (e.g. "['a', 'b']"),
+            # strip brackets/quotes so the slide never shows raw list syntax.
+            if s.startswith("[") and s.endswith("]"):
+                import re as _re
+                s = s[1:-1]
+                # Remove quote chars around list items
+                s = _re.sub(r"[\"']", "", s)
+                # Replace commas with bullet separators
+                s = " · ".join(p.strip() for p in s.split(",") if p.strip())
+            return s[:maxlen]
 
         if wks_5_8:
             for i, wk in enumerate(wks_5_8[:4]):
@@ -1630,17 +1681,33 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         kpi_90 = strategy.get("kpi_targets_90day") or strategy.get("kpi_targets_30day") or ar.get("kpi_targets_90day") or {}
         if not isinstance(kpi_90, dict): kpi_90 = {}
         kpi_fol   = int(kpi_90.get("followers", goal) or goal)
-        # Fix bug: kpi_er may already contain "%" from GPT output → strip before appending
-        kpi_er_raw = str(kpi_90.get("avg_engagement_rate", "3-5") or "3-5")
-        kpi_er_str = kpi_er_raw.rstrip("%").rstrip("%%").strip()
-        kpi_er_disp = f"{kpi_er_str}%"
+        # Fix bug: kpi_er may contain "%", "%%", or "Estimate: " prefix from GPT output.
+        # Strip ALL of these so we never get "Estimate: 4-6%%" or "4-6%%" in the slide.
+        import re as _re21
+        kpi_er_raw = str(kpi_90.get("avg_engagement_rate", "3-5") or "3-5").strip()
+        # Strip meta prefixes (Estimate:, Assumption:, etc.)
+        for _p in ("estimate:", "estimate -", "assumption:", "assumption -", "target:", "kpi:"):
+            if kpi_er_raw.lower().startswith(_p):
+                kpi_er_raw = kpi_er_raw[len(_p):].strip()
+                break
+        # Strip ALL trailing % chars (handles single %, %%, %%%)
+        kpi_er_str = _re21.sub(r"%+\s*$", "", kpi_er_raw).strip()
+        # Strip any in-string %% → % (safety)
+        kpi_er_str = _re21.sub(r"%%+", "%", kpi_er_str).strip().rstrip("%").strip()
+        kpi_er_disp = f"{kpi_er_str}%" if kpi_er_str else "3-5%"
         kpi_reach_raw = kpi_90.get("avg_reach", int(avg_reach*1.5) if avg_reach else 500)
         try:
             kpi_reach = int(kpi_reach_raw)
         except (TypeError, ValueError):
             kpi_reach = 500
         kpi_reels = kpi_90.get("reels_per_week", 7)
-        kpi_saves = kpi_90.get("saves_per_post", 15)
+        kpi_saves_raw = str(kpi_90.get("saves_per_post", 15) or 15)
+        # Strip meta prefixes from saves value too
+        for _p in ("estimate:", "assumption:"):
+            if kpi_saves_raw.lower().startswith(_p):
+                kpi_saves_raw = kpi_saves_raw[len(_p):].strip()
+                break
+        kpi_saves = kpi_saves_raw.rstrip("+").strip() or "15"
         kpi_items21 = [
             ("FOLLOWER TARGET", f"{followers:,} → {kpi_fol:,}", brand_color),
             ("ENGAGEMENT RATE", kpi_er_disp,                    green),
