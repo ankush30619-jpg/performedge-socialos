@@ -1681,33 +1681,42 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         kpi_90 = strategy.get("kpi_targets_90day") or strategy.get("kpi_targets_30day") or ar.get("kpi_targets_90day") or {}
         if not isinstance(kpi_90, dict): kpi_90 = {}
         kpi_fol   = int(kpi_90.get("followers", goal) or goal)
-        # Fix bug: kpi_er may contain "%", "%%", or "Estimate: " prefix from GPT output.
-        # Strip ALL of these so we never get "Estimate: 4-6%%" or "4-6%%" in the slide.
+        # KPI value extractor: GPT often returns verbose strings like
+        # "Estimate: 6-8% on Reels reach" — we need just "6-8%".
+        # Strategy: strip meta-prefix, then regex-extract first numeric/range token.
         import re as _re21
-        kpi_er_raw = str(kpi_90.get("avg_engagement_rate", "3-5") or "3-5").strip()
-        # Strip meta prefixes (Estimate:, Assumption:, etc.)
-        for _p in ("estimate:", "estimate -", "assumption:", "assumption -", "target:", "kpi:"):
-            if kpi_er_raw.lower().startswith(_p):
-                kpi_er_raw = kpi_er_raw[len(_p):].strip()
-                break
-        # Strip ALL trailing % chars (handles single %, %%, %%%)
-        kpi_er_str = _re21.sub(r"%+\s*$", "", kpi_er_raw).strip()
-        # Strip any in-string %% → % (safety)
-        kpi_er_str = _re21.sub(r"%%+", "%", kpi_er_str).strip().rstrip("%").strip()
-        kpi_er_disp = f"{kpi_er_str}%" if kpi_er_str else "3-5%"
+        def _extract_kpi_value(raw, suffix=""):
+            """Extract pure numeric KPI from GPT verbose string.
+            Returns "X-Y<suffix>" or "X<suffix>" — strips all narrative."""
+            v = str(raw or "").strip()
+            for _p in ("estimate:", "estimate -", "assumption:", "assumption -",
+                      "target:", "kpi:", "approx:", "approximately:"):
+                if v.lower().startswith(_p):
+                    v = v[len(_p):].strip()
+                    break
+            # Extract first number or range (e.g. "6-8", "20+", "3-5", "1.5-3")
+            m = _re21.search(r"(\d+(?:\.\d+)?(?:\s*[-–]\s*\d+(?:\.\d+)?)?)\+?", v)
+            if not m:
+                return ""
+            num = m.group(1).replace(" ", "")
+            return f"{num}{suffix}"
+
+        kpi_er_str   = _extract_kpi_value(kpi_90.get("avg_engagement_rate", "3-5"), "%")
+        kpi_er_disp  = kpi_er_str or "3-5%"
         kpi_reach_raw = kpi_90.get("avg_reach", int(avg_reach*1.5) if avg_reach else 500)
         try:
             kpi_reach = int(kpi_reach_raw)
         except (TypeError, ValueError):
-            kpi_reach = 500
-        kpi_reels = kpi_90.get("reels_per_week", 7)
-        kpi_saves_raw = str(kpi_90.get("saves_per_post", 15) or 15)
-        # Strip meta prefixes from saves value too
-        for _p in ("estimate:", "assumption:"):
-            if kpi_saves_raw.lower().startswith(_p):
-                kpi_saves_raw = kpi_saves_raw[len(_p):].strip()
-                break
-        kpi_saves = kpi_saves_raw.rstrip("+").strip() or "15"
+            # Try extracting digits from string
+            _m = _re21.search(r"\d+", str(kpi_reach_raw))
+            kpi_reach = int(_m.group(0)) if _m else 500
+        kpi_reels_raw = kpi_90.get("reels_per_week", 7)
+        try:
+            kpi_reels = int(kpi_reels_raw)
+        except (TypeError, ValueError):
+            _m = _re21.search(r"\d+", str(kpi_reels_raw))
+            kpi_reels = int(_m.group(0)) if _m else 7
+        kpi_saves = _extract_kpi_value(kpi_90.get("saves_per_post", 15), "") or "15"
         kpi_items21 = [
             ("FOLLOWER TARGET", f"{followers:,} → {kpi_fol:,}", brand_color),
             ("ENGAGEMENT RATE", kpi_er_disp,                    green),
