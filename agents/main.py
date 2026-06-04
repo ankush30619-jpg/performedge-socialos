@@ -76,7 +76,7 @@ class RelearnRequest(BaseModel):
 # ── Health ────────────────────────────────────────────────────────────────────
 # BUILD_MARKER bumped on every code change so we can verify Railway deployed the latest commit.
 # Format: <commit-short-sha>-<bug-area>. The /health endpoint echoes it.
-BUILD_MARKER = "v4-fix-user_follower_goal-NameError"
+BUILD_MARKER = "v5-multi-provider+gemini-fallback"
 
 @app.get("/health")
 async def health():
