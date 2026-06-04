@@ -873,7 +873,8 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         if ig_audit.get("goal_was_invalid"):
             warnings.append(f"⚠ Goal regenerated — submitted target was below current followers (auto-set to {goal:,})")
         # Flag auto-generated goals so the reader knows to set their own target
-        if not user_follower_goal and not ig_audit.get("goal_was_invalid") and not ig_connected:
+        # Note: user_follower_goal isn't in this function's scope — use ig_audit flag instead
+        if ig_audit.get("goal_was_auto_generated") and not ig_audit.get("goal_was_invalid") and not ig_connected:
             warnings.append(f"⚡ Target set to {goal:,} auto-calculated — set your own target in Follower Growth Goal for a custom plan")
         if not ig_audit.get("has_live_metrics"):
             _ig_u = (brand.get("igUsername") or "").strip()
