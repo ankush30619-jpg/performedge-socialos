@@ -27,6 +27,36 @@ from skills.registry import (
     ANTI_AI_LANGUAGE_2026_ADDITIONS,
 )
 
+def _robust_json_loads(raw: str) -> dict:
+    """Parse JSON that LLMs sometimes wrap in markdown fences or leave with
+    trailing commas. Tries strict parse first, then progressively repairs.
+
+    Handles the common failure modes of Gemini / Groq / GPT JSON output:
+      - ```json ... ``` markdown fences
+      - leading/trailing prose around the JSON object
+      - trailing commas before } or ]
+    Raises json.JSONDecodeError only if all repair attempts fail.
+    """
+    import re as _re
+    s = (raw or "").strip()
+    # 1) strip markdown code fences
+    if s.startswith("```"):
+        s = _re.sub(r"^```(?:json)?\s*", "", s)
+        s = _re.sub(r"\s*```$", "", s).strip()
+    # 2) fast path
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        pass
+    # 3) extract the outermost {...} object if there's surrounding prose
+    first, last = s.find("{"), s.rfind("}")
+    if first != -1 and last != -1 and last > first:
+        s = s[first:last + 1]
+    # 4) remove trailing commas before } or ]
+    s = _re.sub(r",(\s*[}\]])", r"\1", s)
+    return json.loads(s)
+
+
 # Lazy Supabase singleton — initialized on first use
 _supabase = None
 
@@ -621,7 +651,7 @@ async def _generate_strategy(brand, brand_knowledge, analyst_report, research_da
             max_tokens=4000,  # was 7000 → GPT-5 inflated to 21k (8-12 min hang); now 4k → 8k budget
             response_json=True,
         ), timeout=100)  # hard 100s timeout — prevents infinite hang if OpenAI is slow
-        strategy_out = json.loads(raw_text)
+        strategy_out = _robust_json_loads(raw_text)
         # Ensure KPI targets from analyst flow through to the PPT layer
         if not strategy_out.get("kpi_targets_90day") and analyst_report.get("kpi_targets_90day"):
             strategy_out["kpi_targets_90day"] = analyst_report["kpi_targets_90day"]
@@ -737,7 +767,7 @@ async def _generate_extended_plan(
             max_tokens=2500,  # was 5000 → GPT-5 inflated to 15k; now 2.5k → 6k budget (safe for 3 min)
             response_json=True,
         ), timeout=90)  # 90s hard timeout — extended plan is supplementary; skip if slow
-        return json.loads(raw_text)
+        return _robust_json_loads(raw_text)
     except asyncio.TimeoutError:
         print("[GrowthPlanner] _generate_extended_plan timed out after 90s — continuing without it")
         return {}
@@ -1195,17 +1225,32 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
         slide_header(s, "08  ·  COMPETITOR INTELLIGENCE", "Who you're up against — and where you win.")
         # Show actual competitor names at the top
         comps_found = cd.get("competitors_found") or []
-        if comps_found:
-            # Competitors may be strings or dicts (e.g. {"name": "Symphony", "notes": "..."})
-            # Extract just the name in either case
-            def _comp_name(c):
-                if isinstance(c, dict):
-                    return str(c.get("name") or c.get("handle") or c.get("username") or "")[:30]
-                return str(c)[:30]
-            comp_names_str = "  ·  ".join(_comp_name(c) for c in comps_found[:6] if _comp_name(c))
+        # Competitors may be strings or dicts (e.g. {"name": "Symphony", "notes": "..."})
+        def _comp_name(c):
+            if isinstance(c, dict):
+                return str(c.get("name") or c.get("handle") or c.get("username") or "").strip()[:30]
+            return str(c).strip()[:30]
+        # Filter out generic / placeholder names the LLM sometimes emits when it
+        # can't find real brands (e.g. "Top {niche} account", "Competitor 1").
+        # A real competitor name shouldn't contain the niche string or these markers.
+        _niche_low = niche.lower()[:20]
+        def _is_real_comp(nm):
+            n = (nm or "").lower().strip()
+            if not n or len(n) < 3:
+                return False
+            if _niche_low and _niche_low in n:
+                return False
+            if n.startswith(("top ", "competitor", "account ", "brand ", "leading ")):
+                return False
+            return True
+        _real_comps = [nm for nm in (_comp_name(c) for c in comps_found[:8]) if _is_real_comp(nm)][:6]
+        if _real_comps:
+            comp_names_str = "  ·  ".join(_real_comps)
             bar(s, Inches(0.3), Inches(1.05), Inches(9.4), Inches(0.42), mid_dark)
             txt(s, "COMPETITORS IDENTIFIED:", Inches(0.45), Inches(1.1), Inches(2.2), Inches(0.3), 8, color=accent, bold=True)
             txt(s, comp_names_str, Inches(2.8), Inches(1.1), Inches(6.8), Inches(0.3), 9, color=light)
+        # has_comp_banner controls vertical offset of the diff-strategy quote below
+        comps_found = _real_comps
         diff_strat = cd.get("differentiation_strategy") or ""
         if diff_strat:
             _ds = str(diff_strat).strip()
