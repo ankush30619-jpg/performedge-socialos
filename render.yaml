@@ -1,0 +1,61 @@
+# Render Blueprint — deploys the SocialOS Agents service (FastAPI) on the FREE tier.
+# No credit card required. Auto-deploys on every push to master.
+#
+# HOW TO USE (one-time, ~3 min):
+#   1. Push this file (already in the repo).
+#   2. Go to https://dashboard.render.com → "New +" → "Blueprint".
+#   3. Connect your GitHub and pick the `performedge-socialos` repo.
+#   4. Render reads this file and creates the `socialos-agents` web service.
+#   5. Fill in the secret env vars (marked sync:false) in the dashboard:
+#        GROQ_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY,
+#        NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+#   6. Click "Apply" → first build runs (~4 min) → service goes live.
+#
+# After it's live, copy the service URL (e.g. https://socialos-agents.onrender.com)
+# and set it as NEXT_PUBLIC_AGENTS_URL on the backend so the frontend can reach it.
+#
+# NOTE: Free tier spins the service down after 15 min idle; the first request
+# after idle takes ~50s to cold-start, then it's fast again.
+
+services:
+  - type: web
+    name: socialos-agents
+    runtime: python
+    rootDir: agents
+    plan: free
+    region: oregon
+    branch: master
+    buildCommand: "pip install --upgrade pip && pip install -r requirements.txt"
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # Pin a stable Python (3.13 can break psycopg2/Pillow wheels on Render)
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      # Use Groq by default — most generous free tier. Falls back Gemini→Groq.
+      - key: LLM_PROVIDER
+        value: groq
+      - key: GROQ_BRAIN_MODEL
+        value: llama-3.3-70b-versatile
+      - key: GROQ_SCORER_MODEL
+        value: llama-3.3-70b-versatile
+      - key: GROQ_GRUNT_MODEL
+        value: llama-3.1-8b-instant
+      # ── Secrets — fill these in the Render dashboard (NOT stored in the repo) ──
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: socialos-storage
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: NEWS_API_KEY
+        sync: false
