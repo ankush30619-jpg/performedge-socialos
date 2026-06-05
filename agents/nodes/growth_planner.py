@@ -1323,7 +1323,7 @@ async def _build_growth_ppt(brand, ig_audit, strategy, research_data, competitor
                 "assumptions": [
                     f"Posting at {strategy.get('posting_frequency','1-2x/day')} consistently",
                     f"ER stays at {_er_val or '1.5-3'}% with quality content",
-                    f"Acceleration of {_acl}x required vs. current pace",
+                    f"Sustained growth pace of up to {_mult_best:.1f}x current (realistic ceiling)",
                 ],
             }
         txt(s, "All values below are ESTIMATES based on current trajectory + proposed strategy changes, not measured data.",
